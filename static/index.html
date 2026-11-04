@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>行迹 · AI 多智能体旅行助手</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">行</div>
+        <div>
+          <h1>行迹</h1>
+          <p>AI 多智能体旅行助手 · 单城市单次规划</p>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span id="mode-pill" class="pill pill-demo">检测环境中…</span>
+        <button id="reset-btn" class="ghost-btn" type="button">清空重来</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel form-panel" aria-label="需求输入">
+        <div class="panel-head">
+          <h2>说出你的旅行想法</h2>
+          <p>可以先写一段自然语言，也可以直接填表单。信息不足时只会追问关键问题。</p>
+        </div>
+
+        <div class="nl-block">
+          <label for="raw-text">自然语言需求</label>
+          <textarea id="raw-text" rows="4" placeholder="例如：11月20日从上海去成都玩3天，2个人，人均3000，喜欢美食和博物馆，节奏轻松，必去宽窄巷子，不去酒吧。"></textarea>
+          <div class="chips examples" id="example-chips">
+            <button type="button" class="chip" data-example="11月20日从上海去成都玩3天，2个人，人均3000，喜欢美食和博物馆，节奏轻松，必去宽窄巷子，不去酒吧。">成都 · 美食博物馆</button>
+            <button type="button" class="chip" data-example="2026-12-01至2026-12-04去西安，3人，总预算9000，想看历史古迹，必去兵马俑，节奏紧凑。">西安 · 历史紧凑</button>
+            <button type="button" class="chip" data-example="下个月去云南玩5天，从北京出发，预算8000，喜欢自然风景，不想太累。">云南 · 需要选城市</button>
+          </div>
+        </div>
+
+        <form id="trip-form" class="form-grid" autocomplete="off">
+          <div class="field">
+            <label for="origin">出发地</label>
+            <input id="origin" name="origin" list="city-list" placeholder="如：北京" />
+          </div>
+          <div class="field">
+            <label for="destination">目的地（单城市）</label>
+            <select id="destination" name="destination">
+              <option value="">请选择城市</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="start-date">出发日期</label>
+            <input id="start-date" name="start_date" type="date" />
+          </div>
+          <div class="field">
+            <label for="end-date">返回日期</label>
+            <input id="end-date" name="end_date" type="date" />
+          </div>
+
+          <div class="field field-small">
+            <label for="days">天数</label>
+            <input id="days" name="days" type="number" min="1" max="30" placeholder="自动" />
+          </div>
+          <div class="field field-small">
+            <label for="travelers">人数</label>
+            <input id="travelers" name="travelers" type="number" min="1" max="20" placeholder="1" />
+          </div>
+
+          <div class="field field-wide">
+            <label>预算口径</label>
+            <div class="segmented" id="budget-basis">
+              <button type="button" data-value="total">总预算</button>
+              <button type="button" data-value="per_person">人均预算</button>
+              <button type="button" data-value="">不设预算</button>
+            </div>
+            <input id="budget-amount" name="budget_amount" type="number" min="0" step="100" placeholder="如：8000" />
+          </div>
+
+          <div class="field field-wide">
+            <label>兴趣（可多选）</label>
+            <div class="chips" id="interest-chips">
+              <button type="button" class="chip" data-value="美食">美食</button>
+              <button type="button" class="chip" data-value="博物馆">博物馆</button>
+              <button type="button" class="chip" data-value="历史">历史</button>
+              <button type="button" class="chip" data-value="自然">自然</button>
+              <button type="button" class="chip" data-value="拍照">拍照</button>
+              <button type="button" class="chip" data-value="亲子">亲子</button>
+              <button type="button" class="chip" data-value="夜景">夜景</button>
+              <button type="button" class="chip" data-value="古镇">古镇</button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="intercity-mode">往返交通</label>
+            <select id="intercity-mode" name="intercity_mode">
+              <option value="">不限（系统选择）</option>
+              <option value="高铁">高铁</option>
+              <option value="飞机">飞机</option>
+              <option value="自驾">自驾</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="local-transport">市内交通</label>
+            <select id="local-transport" name="local_transport">
+              <option value="">公共交通（默认）</option>
+              <option value="打车">打车</option>
+              <option value="步行">步行</option>
+              <option value="包车">包车</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="lodging">住宿偏好</label>
+            <select id="lodging" name="lodging">
+              <option value="">舒适型（默认）</option>
+              <option value="经济型">经济型</option>
+              <option value="舒适型">舒适型</option>
+              <option value="豪华型">豪华型</option>
+              <option value="民宿">民宿</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>行程节奏</label>
+            <div class="segmented" id="pace">
+              <button type="button" data-value="轻松">轻松</button>
+              <button type="button" data-value="适中">适中</button>
+              <button type="button" data-value="紧凑">紧凑</button>
+            </div>
+          </div>
+
+          <div class="field field-wide">
+            <label for="must-visit">必去地点</label>
+            <input id="must-visit" name="must_visit" placeholder="用逗号分隔，如：宽窄巷子、成都博物馆" />
+          </div>
+          <div class="field field-wide">
+            <label for="avoid">禁止 / 避开事项</label>
+            <input id="avoid" name="avoid" placeholder="如：不去酒吧、不吃辣、不爬山" />
+          </div>
+          <div class="field field-wide">
+            <label for="notes">其他说明</label>
+            <textarea id="notes" name="notes" rows="2" placeholder="如：带老人、想拍照、需要无障碍设施"></textarea>
+          </div>
+
+          <details class="advanced field-wide">
+            <summary>演示与调试选项</summary>
+            <div class="field">
+              <label for="demo-weather">天气场景</label>
+              <select id="demo-weather" name="demo_weather">
+                <option value="auto">自动（有 Key 用预报，否则气候参考）</option>
+                <option value="rainy">强制雨天（验证天气适配）</option>
+                <option value="sunny">强制晴天</option>
+              </select>
+              <p class="hint">强制天气会明确标注为“演示”，不会被当成真实预报。</p>
+            </div>
+          </details>
+
+          <button id="submit-btn" class="primary-btn field-wide" type="submit">
+            <span class="btn-label">开始规划</span>
+            <span class="spinner" hidden></span>
+          </button>
+        </form>
+
+        <datalist id="city-list"></datalist>
+        <p class="scope-note">第一版范围：中国境内、单城市、单次旅行。跨城市路线、国际签证、自动付款与订单预订不在本版。</p>
+      </section>
+
+      <section class="panel result-panel" aria-live="polite">
+        <div id="empty-state" class="empty-state">
+          <div class="empty-visual">
+            <div class="orbit orbit-one"></div>
+            <div class="orbit orbit-two"></div>
+            <div class="empty-core">行迹</div>
+          </div>
+          <h2>把一次旅行，拆成六个可核验的步骤</h2>
+          <p>需求理解 → 资料检索 → 天气适配 → 地点核验 → 路线编排 → 预算计算。每一步都会留下结果与来源，而不是只给一段无法验证的文案。</p>
+          <div class="feature-grid">
+            <article>
+              <span class="feature-index">01</span>
+              <h3>先澄清，再规划</h3>
+              <p>日期、天数、预算口径冲突时先提问，不把推测写成你的偏好。</p>
+            </article>
+            <article>
+              <span class="feature-index">02</span>
+              <h3>地点必须核验</h3>
+              <p>编排只使用通过核验的地点；必去地点无法匹配时会明确告知。</p>
+            </article>
+            <article>
+              <span class="feature-index">03</span>
+              <h3>天气真的会改行程</h3>
+              <p>降水或高温时优先室内景点，并记录替换过程。</p>
+            </article>
+            <article>
+              <span class="feature-index">04</span>
+              <h3>预算透明可解释</h3>
+              <p>分项估算、人均/总额口径、超支建议全部可见。</p>
+            </article>
+            <article>
+              <span class="feature-index">05</span>
+              <h3>支持 Word 与 PDF</h3>
+              <p>导出 .docx、.doc 与 PDF，包含来源、假设与风险提示。</p>
+            </article>
+            <article>
+              <span class="feature-index">06</span>
+              <h3>没有 Key 也能跑</h3>
+              <p>演示模式明确标注示例数据，不伪装成实时结果。</p>
+            </article>
+          </div>
+        </div>
+
+        <div id="clarify-view" class="view" hidden>
+          <div class="section-title">
+            <span class="eyebrow">需要确认</span>
+            <h2>还差几个关键信息</h2>
+          </div>
+          <p id="clarify-summary" class="muted"></p>
+          <form id="clarify-form" class="clarify-form"></form>
+          <div class="assumption-box" id="assumption-box" hidden></div>
+          <button id="clarify-submit" class="primary-btn" type="button">提交并继续</button>
+        </div>
+
+        <div id="progress-view" class="view" hidden>
+          <div class="section-title">
+            <span class="eyebrow">多智能体协作中</span>
+            <h2>正在生成可核验行程</h2>
+          </div>
+          <div class="progress-track"><div id="progress-bar" class="progress-bar"></div></div>
+          <div id="agent-timeline" class="agent-timeline"></div>
+          <div id="live-log" class="live-log"></div>
+        </div>
+
+        <div id="error-view" class="view" hidden>
+          <div class="error-card">
+            <h2>生成中断</h2>
+            <p id="error-message"></p>
+            <button type="button" class="ghost-btn" onclick="document.getElementById('error-view').hidden=true">返回修改</button>
+          </div>
+        </div>
+
+        <div id="result-view" class="view" hidden></div>
+      </section>
+    </main>
+  </div>
+
+  <dialog id="export-dialog" class="export-dialog" aria-labelledby="export-title">
+    <div class="export-sheet">
+      <p class="export-kicker">Export</p>
+      <h2 id="export-title">导出行程</h2>
+      <p class="export-sub">选择文件格式，下载后可离线查看或继续编辑。</p>
+      <div class="export-options">
+        <button type="button" data-format="docx">
+          <span class="fmt-badge is-doc">DOCX</span>
+          <span class="fmt-text"><strong>Word 文档</strong><small>可继续编辑，适合打印或分享</small></span>
+          <span class="fmt-arrow" aria-hidden="true">→</span>
+        </button>
+        <button type="button" data-format="doc">
+          <span class="fmt-badge is-doc">DOC</span>
+          <span class="fmt-text"><strong>Word 文档（兼容格式）</strong><small>兼容旧版 Word / WPS</small></span>
+          <span class="fmt-arrow" aria-hidden="true">→</span>
+        </button>
+        <button type="button" data-format="pdf">
+          <span class="fmt-badge is-pdf">PDF</span>
+          <span class="fmt-text"><strong>PDF 文档</strong><small>排版固定，适合直接查看</small></span>
+          <span class="fmt-arrow" aria-hidden="true">→</span>
+        </button>
+        <button type="button" data-format="md">
+          <span class="fmt-badge is-md">MD</span>
+          <span class="fmt-text"><strong>Markdown</strong><small>纯文本，便于二次整理</small></span>
+          <span class="fmt-arrow" aria-hidden="true">→</span>
+        </button>
+      </div>
+      <div class="export-foot">
+        <span>包含每日行程、预算明细与来源说明</span>
+        <button type="button" class="export-cancel" data-close>取消</button>
+      </div>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/app.js"></script>
+</body>
+</html>
