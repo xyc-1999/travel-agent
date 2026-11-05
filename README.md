@@ -40,7 +40,7 @@
 - **地点核验**：只输出白名单地点；检查坐标、开放日、闭馆星期；必去地点无法匹配或全部闭馆时显式告知。
 - **路线编排**：按节奏安排每天 1/2/3 个景点，就近排序，生成带交通方式、耗时与费用的时间轴；到达已闭馆则跳过，营业时间不足则缩短停留并记录。
 - **天气适配**：降水或高温时优先室内景点，发生替换会写明“由谁替换为谁”；必去地点不会被天气替换。
-- **预算计算**：交通、住宿、餐饮、门票分项估算，支持总额/人均口径；超支只给可执行建议，不自动削减用户偏好。
+- **预算计算**：交通、住宿、餐饮、门票分项估算，支持总额/人均口径；估算超出预算时明确写出预算上限、实际估算与差额；当差额超过 500 元容差时，优先调整用户未指定的交通方式与住宿档次，并记录每项调整；必去地点与明确偏好不被替换。
 - **可观测**：六个 Agent 的状态、摘要、明细与耗时随行程保存，前端时间轴与 SSE 事件同源。
 
 ### 结果与导出
@@ -73,7 +73,7 @@
         ▼
 [5] route 路线编排（就近排序 + 时间轴 + 闭馆检查 + 室内替换）
         ▼
-[6] budget 预算计算（分项、口径、超支建议）
+[6] budget 预算计算（分项、口径、500 元容差约束与适配记录）
         ▼
 [7] export 行程导出（用户点击时生成 doc/docx/pdf/md）
 ```
@@ -84,10 +84,10 @@
 | --- | --- | --- | --- |
 | requirement | `RequirementInput` | `RequirementAnalysis` | 自然语言解析、冲突检测、默认值只写入 `assumptions` |
 | research | `RequirementInput` | `ResearchResult` | 只检索本地示例攻略；无覆盖时明确说明，不编造引用 |
-| weather | 城市 + 日期 | `list[WeatherDay]` | 无 Key 用历史气候参考；强制天气标注“演示” |
+| weather | 城市 + 日期 | `list[WeatherDay]` | 有 Key 时按行程跨度自动选择 3/7/10/15/30 天预报，超出 30 天回退历史气候参考；强制天气标注“演示” |
 | verification | `RequirementInput` | `VerificationResult` | 只输出白名单地点；必去无法匹配/闭馆时显式告知 |
 | route | 需求 + 核验 + 天气 | `list[DayPlan]` | 每天 1/2/3 个景点、就近排序、闭馆跳过或缩短并记录 |
-| budget | 需求 + 行程 + 核验 | `BudgetPlan` | 分项求和、总额/人均换算、超支只给建议不改偏好 |
+| budget | 需求 + 行程 + 核验 | `BudgetPlan` | 分项求和、总额/人均换算、500 元容差校验与预算适配；不改必去地点与明确偏好 |
 | export | `Itinerary` | bytes | DOCX、RTF 容器 `.doc`、PDF（STSong-Light 中文字体）、Markdown |
 
 **扩展方式**：Agent 之间通过 typed model 解耦，阶段执行统一走 `run_stage`。新增“跨城市路线”“预订”等能力时，在 `pipeline.py` 实现阶段并登记 `STAGE_META`，编排器只需调整调用顺序，不需要改写已有 Agent；第一版没有提前实现这些阶段。
@@ -137,7 +137,7 @@ travel-agent/
 │     └─ knowledge/*.md      # 6 篇示例攻略
 ├─ static/                   # 前端页面
 ├─ docs/screenshots/         # README 截图
-├─ tests/                    # 43 个 pytest 用例
+├─ tests/                    # 53 个 pytest 用例
 ├─ scripts/smoke.py          # 真实 HTTP + SSE + 导出冒烟脚本
 ├─ artifacts/                # 冒烟生成的导出文件
 ├─ .env.example
@@ -173,7 +173,7 @@ $env:PIP_CACHE_DIR = "d:\Courses\travel-agent\.pip-cache"
 | --- | --- | --- |
 | `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | OpenAI 兼容接口润色概述与提示 | 使用模板文案 |
 | `AMAP_API_KEY` | 非示例城市的高德 POI 检索 | 仅使用内置 6 城示例库 |
-| `QWEATHER_API_KEY` / `QWEATHER_API_HOST` | 和风 3 天预报 | 使用历史气候参考 |
+| `QWEATHER_API_KEY` / `QWEATHER_API_HOST` | 和风天气预报（按跨度自动选择 3/7/10/15/30 天） | 使用历史气候参考 |
 | `DATABASE_PATH` | SQLite 相对路径 | `data/app.db` |
 
 ---
@@ -224,14 +224,14 @@ $env:PIP_CACHE_DIR = "d:\Courses\travel-agent\.pip-cache"
 
 已验证结果：
 
-- `48 passed`，覆盖：
+- `53 passed`，覆盖：
   - 自然语言解析（出发地、目的地、日期、人数、预算口径、必去、避开、节奏）
   - 省级目的地追问、直辖市按城市处理、表单优先与清单合并
   - 预算口径追问、日期/天数冲突、问题截断后的显式假设
   - 端到端行程结构、时间轴不倒挂、预算分项求和
-  - 雨天室内适配记录、必去不被替换、超预算透明建议、无预算不误判
+  - 雨天室内适配记录、必去不被替换、超预算精确差额与 500 元容差、未指定交通/住宿的自动预算适配、明确偏好不被改动、无预算不误判
   - 必去未匹配、避开别名过滤、未覆盖城市显式不可用
-  - 和风 API Host 解析、本地坐标转天气请求参数、测试与本地真实 Key 隔离
+  - 和风 API Host 解析、本地坐标转天气请求参数、按行程跨度选择 3/7/10/15/30 天预报接口、超过 30 天不下发请求、测试与本地真实 Key 隔离
   - 阶段契约边界：`agent_start` 先于 `agent_done`、trace 状态与耗时、示例库/高德/不可用三种地点来源、分页总数不被 `limit` 截断
   - DOCX 为合法 Word 包、PDF 可解析、`.doc` 为纯 ASCII RTF、Markdown 完整
   - API health/meta、澄清后生成、404、导出、SSE 六 Agent 顺序

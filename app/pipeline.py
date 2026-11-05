@@ -181,11 +181,16 @@ def budget_stage(
         f"总估算 {budget.total:.0f} 元，人均 {budget.per_person:.0f} 元",
         f"预算状态：{budget.budget_status}",
     ]
+    if budget.limit_total is not None:
+        details.append(f"预算上限 {budget.limit_total:.0f} 元，容差 {budget.tolerance_amount:.0f} 元")
+    if budget.over_budget_amount > 0:
+        details.append(f"超出预算 {budget.over_budget_amount:.0f} 元（{'容差内' if budget.within_tolerance else '超过容差'}）")
+    details.extend(budget.adjustments)
     details.extend(budget.suggestions[:3])
     return StageOutcome(
         value=budget,
-        summary="完成分项预算与预算口径校验",
+        summary="完成分项预算与预算容差校验",
         details=details,
-        status="warning" if budget.budget_status == "over_budget" else "done",
+        status="warning" if budget.budget_status == "over_budget" or budget.adjustments else "done",
         assumptions=list(budget.assumptions),
     )

@@ -53,14 +53,29 @@ def _climate_day(city: str, day: date) -> WeatherDay:
     )
 
 
-def _qweather_weather_url() -> str:
-    """按 API Host 规则返回 3 天天气预报地址。"""
+FORECAST_HORIZONS = ((3, "3d"), (7, "7d"), (10, "10d"), (15, "15d"), (30, "30d"))
+
+
+def _forecast_endpoint(horizon_days: int) -> str:
+    """按行程距离今天的天数选择可覆盖的最短预报接口。"""
+    for limit, endpoint in FORECAST_HORIZONS:
+        if horizon_days <= limit:
+            return endpoint
+    return ""
+
+
+def _qweather_weather_url(horizon_days: int = 3) -> str:
+    """按 API Host 规则返回指定跨度的天气预报地址。"""
+    endpoint = _forecast_endpoint(horizon_days)
+    if not endpoint:
+        return ""
     host = config.QWEATHER_API_HOST.strip().rstrip("/")
     if host:
         if not host.startswith(("http://", "https://")):
             host = f"https://{host}"
-        return f"{host}/v7/weather/3d"
-    return "https://devapi.qweather.com/v7/weather/3d"
+        return f"{host}/v7/weather/{endpoint}"
+    return f"https://devapi.qweather.com/v7/weather/{endpoint}"
+
 
 
 def _weather_location(city: str) -> str | None:
@@ -73,12 +88,20 @@ def _weather_location(city: str) -> str | None:
 
 
 def _qweather_forecast(city: str, start: date, end: date) -> dict[date, WeatherDay]:
-    if not config.QWEATHER_API_KEY or (end - start).days > 6:
+    if not config.QWEATHER_API_KEY:
+        return {}
+    today = date.today()
+    if (start - today).days >= 30:
+        return {}
+    horizon = min((end - today).days + 1, 30)
+    if horizon < 1:
         return {}
     location = _weather_location(city)
     if not location:
         return {}
-    weather_url = _qweather_weather_url()
+    weather_url = _qweather_weather_url(horizon)
+    if not weather_url:
+        return {}
     headers = {"Accept": "application/json"}
     try:
         with httpx.Client(timeout=config.QWEATHER_TIMEOUT_SECONDS, headers=headers) as client:
@@ -114,7 +137,7 @@ def _qweather_forecast(city: str, start: date, end: date) -> dict[date, WeatherD
             source="qweather_forecast",
             is_forecast=True,
             outdoor_ok=outdoor_ok,
-            note="和风天气 3 天预报。",
+            note="和风天气预报，非历史气候参考。",
             advice=(
                 "有降水或高温，优先室内景点并准备雨具。"
                 if not outdoor_ok

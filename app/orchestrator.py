@@ -43,7 +43,7 @@ def _source_label(verification: VerificationResult, weather_days: list[WeatherDa
         parts.append("内置示例地点库")
         demo = True
     if any(day.is_forecast for day in weather_days):
-        parts.append("和风天气 3 天预报")
+        parts.append("和风天气预报")
     else:
         parts.append("历史气候参考")
         demo = True
@@ -64,7 +64,7 @@ def _default_summary(draft: RequirementInput, itinerary_days: int, total: float,
     )
 
 
-def _build_tips(draft: RequirementInput, weather_days: list[WeatherDay], budget_status: str) -> list[str]:
+def _build_tips(draft: RequirementInput, weather_days: list[WeatherDay], budget: BudgetPlan) -> list[str]:
     tips = [
         "博物馆、热门景区通常需要提前预约，出发前请在官方渠道复核开放时间与闭馆日。",
         "行程中的票价、营业时间与住宿价格为示例或规则估算，不是实时报价。",
@@ -75,8 +75,17 @@ def _build_tips(draft: RequirementInput, weather_days: list[WeatherDay], budget_
         tips.append(f"{dates} 天气条件不适合长时间户外，已优先安排室内景点，建议携带雨具并保留机动时间。")
     if draft.origin and draft.origin != draft.destination:
         tips.append("往返大交通按距离规则估算，建议尽早购票并预留到站/值机时间。")
-    if budget_status == "over_budget":
-        tips.append("当前估算超出预算，可按建议调整住宿档次、付费景点或行程天数，系统不会自动改写你的偏好。")
+    if budget.budget_status == "over_budget":
+        if budget.adjustments:
+            tips.append(
+                f"估算总花费超出预算 {budget.over_budget_amount:.0f} 元，"
+                f"已优先调整未指定的交通或住宿以控制开支，必去地点与明确偏好未改动。"
+            )
+        else:
+            tips.append(
+                f"估算总花费超出预算 {budget.over_budget_amount:.0f} 元，"
+                "系统未自动改写已确认偏好，可按预算建议进一步调整。"
+            )
     if draft.must_visit:
         tips.append("必去地点已优先纳入；若遇闭馆或核验失败，会在结果中明确标注，不会虚构可访问状态。")
     return tips[:5]
@@ -145,7 +154,9 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
 
     if budget.budget_status == "over_budget":
         warnings.append(
-            f"估算总花费 {budget.total:.0f} 元，超出预算 {budget.over_budget_amount:.0f} 元；未自动更改已确认偏好。"
+            f"预算上限 {budget.limit_total:.0f} 元，估算总花费 {budget.total:.0f} 元，"
+            f"超出预算 {budget.over_budget_amount:.0f} 元"
+            f"（{budget.tolerance_amount:.0f} 元容差，{'已控制在容差内' if budget.within_tolerance else '仍超过容差'}）。"
         )
 
     # 文案与来源
@@ -163,7 +174,7 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
     narrative = generate_narrative(facts, fallback_summary)
     llm_used = narrative is not None
     summary, narrative_tips = narrative if narrative else (fallback_summary, [])
-    tips = narrative_tips or _build_tips(draft, weather_days, budget.budget_status)
+    tips = narrative_tips or _build_tips(draft, weather_days, budget)
 
     demo_mode, data_mode_label = _source_label(verification, weather_days, llm_used)
     sources: list[SourceRef] = []
@@ -201,8 +212,8 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
         sources.append(
             SourceRef(
                 type="weather",
-                title="和风天气 3 天预报",
-                detail="仅覆盖预报范围内的日期。",
+                title="和风天气预报",
+                detail="按行程跨度选择可用的预报接口；超出预报范围时回退历史气候参考。",
                 level="forecast",
                 verified=True,
             )

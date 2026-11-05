@@ -190,11 +190,15 @@ class BudgetPlan(BaseModel):
     currency: str = "CNY"
     lines: list[BudgetLine] = Field(default_factory=list)
     total: float = 0.0
+    original_total: float = 0.0
     per_person: float = 0.0
     limit_total: float | None = None
     budget_status: Literal["ok", "over_budget", "no_budget"] = "no_budget"
     remaining: float | None = None
     over_budget_amount: float = 0.0
+    tolerance_amount: float = 0.0
+    within_tolerance: bool = True
+    adjustments: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
 

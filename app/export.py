@@ -38,9 +38,16 @@ def _weather_text(day) -> str:
 def _budget_status_text(itinerary: Itinerary) -> str:
     budget = itinerary.budget
     if budget.budget_status == "ok":
-        return f"预算内，剩余 {_money(budget.remaining or 0)}"
+        limit_text = f"（预算上限 {_money(budget.limit_total)}）" if budget.limit_total is not None else ""
+        return f"预算内，剩余 {_money(budget.remaining or 0)}{limit_text}"
     if budget.budget_status == "over_budget":
-        return f"超出预算 {_money(budget.over_budget_amount)}"
+        tolerance_text = (
+            f"{_money(budget.tolerance_amount)}容差内"
+            if budget.within_tolerance
+            else f"超过 {_money(budget.tolerance_amount)}容差"
+        )
+        limit_text = f"预算上限 {_money(budget.limit_total)}；" if budget.limit_total is not None else ""
+        return f"超出预算 {_money(budget.over_budget_amount)}（{limit_text}{tolerance_text}）"
     return "未设置预算上限"
 
 
@@ -87,10 +94,13 @@ def build_markdown(itinerary: Itinerary) -> str:
             "",
             f"预算状态：{_budget_status_text(itinerary)}",
             "",
-            "## 每日行程",
-            "",
         ]
     )
+    if itinerary.budget.adjustments:
+        lines.extend(["**预算适配记录**", ""])
+        lines.extend(f"- {item}" for item in itinerary.budget.adjustments)
+        lines.append("")
+    lines.extend(["## 每日行程", ""])
     lines.extend(_item_lines(itinerary))
     if itinerary.tips:
         lines.extend(["## 出行提示", ""])
@@ -164,6 +174,11 @@ def build_docx(itinerary: Itinerary) -> bytes:
         document.add_heading("预算建议", level=2)
         for suggestion in itinerary.budget.suggestions:
             document.add_paragraph(suggestion, style="List Bullet")
+
+    if itinerary.budget.adjustments:
+        document.add_heading("预算适配记录", level=2)
+        for item in itinerary.budget.adjustments:
+            document.add_paragraph(item, style="List Bullet")
 
     document.add_heading("每日行程", level=1)
     for day in itinerary.days:
@@ -299,6 +314,11 @@ def build_pdf(itinerary: Itinerary) -> bytes:
         for suggestion in itinerary.budget.suggestions:
             story.append(Paragraph(f"• {escape(suggestion)}", styles["small"]))
 
+    if itinerary.budget.adjustments:
+        story.append(Paragraph("预算适配记录", styles["h2"]))
+        for item in itinerary.budget.adjustments:
+            story.append(Paragraph(f"• {escape(item)}", styles["small"]))
+
     story.append(Paragraph("每日行程", styles["h1"]))
     for day in itinerary.days:
         story.append(Paragraph(escape(f"第 {day.day_index} 天 · {day.date.isoformat()} · {day.theme}"), styles["h2"]))
@@ -378,6 +398,9 @@ def build_doc_rtf(itinerary: Itinerary) -> bytes:
     if itinerary.budget.suggestions:
         lines.append("预算建议：")
         lines.extend(f"- {item}" for item in itinerary.budget.suggestions)
+    if itinerary.budget.adjustments:
+        lines.append("预算适配记录：")
+        lines.extend(f"- {item}" for item in itinerary.budget.adjustments)
     lines.extend(["", "【每日行程】"])
     for day in itinerary.days:
         lines.append("")

@@ -117,6 +117,55 @@ def test_over_budget_is_transparent_and_does_not_rewrite_preferences(complete_pa
     assert any("超出预算" in warning for warning in itinerary.warnings)
 
 
+def test_over_budget_reports_exact_amount_and_tolerance(complete_payload: RequirementInput):
+    from app.export import build_markdown
+
+    payload = complete_payload.model_copy(
+        update={
+            "intercity_mode": "飞机",
+            "lodging": "豪华型",
+            "budget": BudgetSpec(amount=3000, basis="total"),
+        }
+    )
+    itinerary = _ready_itinerary(payload)
+    budget = itinerary.budget
+
+    assert budget.budget_status == "over_budget"
+    assert budget.tolerance_amount == 500
+    assert budget.within_tolerance is False
+    assert round(budget.total - budget.limit_total, 2) == budget.over_budget_amount
+    assert any(
+        "超出预算" in warning and f"{budget.over_budget_amount:.0f} 元" in warning
+        for warning in itinerary.warnings
+    )
+    markdown = build_markdown(itinerary)
+    assert "超出预算" in markdown
+    assert f"{budget.over_budget_amount:.0f} 元" in markdown
+
+
+def test_budget_fitting_keeps_plan_within_tolerance(complete_payload: RequirementInput):
+    payload = complete_payload.model_copy(
+        update={
+            "intercity_mode": None,
+            "lodging": None,
+            "budget": BudgetSpec(amount=5000, basis="total"),
+        }
+    )
+    itinerary = _ready_itinerary(payload)
+    budget = itinerary.budget
+
+    assert budget.total <= budget.limit_total + budget.tolerance_amount
+    assert budget.over_budget_amount > 0
+    assert budget.within_tolerance is True
+    assert budget.original_total > budget.total
+    assert budget.adjustments
+    assert "原方案" in budget.adjustments[0]
+    assert any("往返交通" in item for item in budget.adjustments)
+    assert any("住宿" in item for item in budget.adjustments)
+    hotel_items = [item for day in itinerary.days for item in day.items if item.kind == "hotel"]
+    assert all(item.cost <= 300 for item in hotel_items)
+
+
 def test_per_person_budget_is_multiplied_for_limit(complete_payload: RequirementInput):
     payload = complete_payload.model_copy(
         update={"budget": BudgetSpec(amount=2500, basis="per_person"), "travelers": 2}

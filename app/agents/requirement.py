@@ -483,7 +483,6 @@ def analyze_requirement(
         field_sources["pace"] = "default"
         assumptions.append("未指定行程节奏，按“适中”排期。")
     if not draft.lodging:
-        draft.lodging = "舒适型"
         field_sources["lodging"] = "default"
         assumptions.append("未指定住宿档次，按“舒适型”估算，未视为已确认偏好。")
     if not draft.local_transport:

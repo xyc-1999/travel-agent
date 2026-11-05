@@ -465,11 +465,14 @@
   const renderBudget = (itinerary) => {
     const budget = itinerary.budget;
     const statusText = budget.budget_status === "ok"
-      ? `预算内 · 剩余 ${money(budget.remaining || 0)}`
+      ? `预算内 · 剩余 ${money(budget.remaining || 0)}${budget.limit_total ? ` · 预算 ${money(budget.limit_total)}` : ""}`
       : budget.budget_status === "over_budget"
-        ? `超出预算 ${money(budget.over_budget_amount)} · 未自动更改偏好`
+        ? `超出预算 ${money(budget.over_budget_amount)}${budget.limit_total ? ` · 预算 ${money(budget.limit_total)}` : ""} · ${budget.within_tolerance ? `${money(budget.tolerance_amount)}容差内` : `超过 ${money(budget.tolerance_amount)}容差`}`
         : "未设置预算上限 · 仅做估算";
     const statusClass = budget.budget_status === "over_budget" ? "over" : budget.budget_status === "ok" ? "" : "empty";
+    const adjustments = (budget.adjustments || []).length
+      ? `<div class="budget-adjust"><h4>预算适配记录</h4><ul class="note-list">${budget.adjustments.map((item) => `<li>${esc(item)}</li>`).join("")}</ul></div>`
+      : "";
     const bars = budget.lines.filter((line) => line.amount > 0).map((line) => {
       const ratio = budget.total ? Math.max(2, (line.amount / budget.total) * 100) : 0;
       return `
@@ -488,6 +491,7 @@
       <div class="section">
         <h3>预算明细</h3>
         <div class="budget-status ${statusClass}">${esc(statusText)}</div>
+        ${adjustments}
         <div class="budget-bars">${bars}</div>
         <table class="budget-table">
           <thead><tr><th>项目</th><th>金额</th><th>说明</th></tr></thead>
@@ -515,7 +519,11 @@
   const renderResult = (itinerary) => {
     showView("result");
     const container = $("#result-view");
-    const budgetBadge = itinerary.budget.budget_status === "over_budget" ? "超预算" : itinerary.budget.budget_status === "ok" ? "预算内" : "未设预算";
+    const budgetNote = itinerary.budget.budget_status === "over_budget"
+      ? `预算 ${money(itinerary.budget.limit_total)} · 超出 ${money(itinerary.budget.over_budget_amount)}`
+      : itinerary.budget.budget_status === "ok"
+        ? `预算 ${money(itinerary.budget.limit_total)} · 剩余 ${money(itinerary.budget.remaining || 0)}`
+        : "未设预算";
     const weather = itinerary.days.map((day) => weatherChip(day.weather)).join("");
     const tips = itinerary.tips.length
       ? `<div class="section"><h3>出行提示</h3><div class="tips-box">${itinerary.tips.map((tip) => `<div class="tip-card">${esc(tip)}</div>`).join("")}</div></div>`
@@ -546,7 +554,7 @@
       <div class="stat-grid">
         <div class="stat"><span>行程天数</span><strong>${esc(itinerary.days_count)}<small> 天</small></strong></div>
         <div class="stat"><span>出行人数</span><strong>${esc(itinerary.travelers)}<small> 人</small></strong></div>
-        <div class="stat ${itinerary.budget.budget_status === "over_budget" ? "over" : ""}"><span>估算总花费</span><strong>${Math.round(itinerary.budget.total).toLocaleString("zh-CN")}<small> 元</small></strong><small>${esc(budgetBadge)}</small></div>
+        <div class="stat ${itinerary.budget.budget_status === "over_budget" ? "over" : ""}"><span>估算总花费</span><strong>${Math.round(itinerary.budget.total).toLocaleString("zh-CN")}<small> 元</small></strong><small>${esc(budgetNote)}</small></div>
         <div class="stat"><span>人均估算</span><strong>${Math.round(itinerary.budget.per_person).toLocaleString("zh-CN")}<small> 元</small></strong></div>
       </div>
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app import config
 from app.data_loader import city_coordinates
-from app.services.weather import _qweather_weather_url, _weather_location
+from app.services.weather import _forecast_endpoint, _qweather_weather_url, _weather_location
 
 
 def test_qweather_url_uses_custom_api_host(monkeypatch):
@@ -31,3 +31,24 @@ def test_weather_location_uses_local_city_coordinates():
 
 def test_weather_location_returns_none_for_unknown_city():
     assert _weather_location("某未知城市") is None
+
+
+def test_forecast_endpoint_expands_with_trip_horizon():
+    assert _forecast_endpoint(3) == "3d"
+    assert _forecast_endpoint(7) == "7d"
+    assert _forecast_endpoint(10) == "10d"
+    assert _forecast_endpoint(15) == "15d"
+    assert _forecast_endpoint(18) == "30d"
+    assert _forecast_endpoint(30) == "30d"
+
+
+def test_qweather_url_uses_longer_endpoint(monkeypatch):
+    monkeypatch.setattr(config, "QWEATHER_API_HOST", "https://abc123.qweatherapi.com")
+
+    assert _qweather_weather_url(18) == "https://abc123.qweatherapi.com/v7/weather/30d"
+
+
+def test_qweather_url_is_empty_beyond_forecast_range(monkeypatch):
+    monkeypatch.setattr(config, "QWEATHER_API_HOST", "https://abc123.qweatherapi.com")
+
+    assert _qweather_weather_url(31) == ""
