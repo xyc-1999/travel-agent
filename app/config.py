@@ -48,3 +48,4 @@ DATABASE_PATH = BASE_DIR / _env("DATABASE_PATH", "data/app.db")
 DEMO_MODE = not bool(LLM_API_KEY or AMAP_API_KEY or QWEATHER_API_KEY)
 
 SUPPORTED_CITIES = ("北京", "上海", "成都", "杭州", "西安", "大理")
+CORS_ORIGINS = tuple(origin.strip() for origin in _env("CORS_ORIGINS", "http://127.0.0.1:8765,http://localhost:8765").split(",") if origin.strip())

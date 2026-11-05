@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from threading import Event
 from typing import Generator, cast
 
 from app.models import (
@@ -47,7 +48,12 @@ def _source_label(
     else:
         parts.append("内置示例地点库")
         demo = True
-    if any(day.is_forecast for day in weather_days):
+    has_forecast = any(day.is_forecast for day in weather_days)
+    has_reference = any(not day.is_forecast for day in weather_days)
+    if has_forecast and has_reference:
+        parts.append("和风天气预报 + 历史气候参考（按日期混合）")
+        demo = True
+    elif has_forecast:
         parts.append("和风天气预报")
     else:
         parts.append("历史气候参考")
@@ -98,6 +104,7 @@ def _build_tips(
         tips.append(f"{dates} 天气条件不适合长时间户外，已优先安排室内景点，建议携带雨具并保留机动时间。")
     if draft.origin and draft.origin != draft.destination:
         tips.append("往返大交通按距离规则估算，建议尽早购票并预留到站/值机时间。")
+    tips.append("市内路线耗时按直线距离、固定速度与缓冲时间估算，不是实时路网导航；出发前请核对地图路线。")
     if budget.budget_status == "over_budget":
         if budget.adjustments:
             tips.append(
@@ -114,7 +121,10 @@ def _build_tips(
     return tips[:5]
 
 
-def iter_generation(session_id: str) -> Generator[dict, None, None]:
+def iter_generation(session_id: str, cancel_event: Event | None = None) -> Generator[dict, None, None]:
+    def cancelled() -> bool:
+        return cancel_event is not None and cancel_event.is_set()
+
     session = get_session(session_id)
     if not session:
         yield {"event": "error", "data": {"message": "会话不存在或已过期，请重新填写需求。"}}
@@ -138,21 +148,29 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
     total = len(STAGE_META)
 
     # 1. 需求理解（复核）
+    if cancelled():
+        return
     run = yield from run_stage("requirement", "需求理解", 1, total, lambda: requirement_stage(analysis))
     trace.append(run.trace)
 
     # 2. 资料检索
+    if cancelled():
+        return
     run = yield from run_stage("research", "资料检索", 2, total, lambda: research_stage(draft))
     research = cast(ResearchResult, run.outcome.value)
     trace.append(run.trace)
 
     # 3. 天气
+    if cancelled():
+        return
     run = yield from run_stage("weather", "天气适配", 3, total, lambda: weather_stage(draft))
     weather = cast(WeatherOutcome, run.outcome.value)
     weather_days = weather.days
     trace.append(run.trace)
 
     # 4. 地点核验
+    if cancelled():
+        return
     run = yield from run_stage("verification", "地点核验", 4, total, lambda: verification_stage(draft))
     verification = cast(VerificationResult, run.outcome.value)
     warnings.extend(run.outcome.warnings or [])
@@ -163,6 +181,8 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
         return
 
     # 5. 路线编排
+    if cancelled():
+        return
     run = yield from run_stage("route", "路线编排", 5, total, lambda: route_stage(draft, verification, weather_days))
     route = cast(RouteOutcome, run.outcome.value)
     days = route.days
@@ -170,6 +190,8 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
     trace.append(run.trace)
 
     # 6. 预算
+    if cancelled():
+        return
     run = yield from run_stage("budget", "预算计算", 6, total, lambda: budget_stage(draft, days, verification))
     budget = cast(BudgetPlan, run.outcome.value)
     assumptions.extend(run.outcome.assumptions or [])
@@ -201,6 +223,8 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
         draft, len(days), budget.total, budget.per_person, budget.completeness
     )
     llm_summary = generate_summary(facts, fallback_summary)
+    if cancelled():
+        return
     llm_used = llm_summary is not None
     summary = llm_summary or fallback_summary
     tips = _build_tips(draft, weather_days, budget, verification.source_mode)
@@ -299,6 +323,8 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
         agent_trace=trace,
         request_snapshot=draft,
     )
+    if cancelled():
+        return
     save_trip(itinerary)
 
     # 导出 Agent 只在用户点击导出时执行；这里在 trace 中说明可用性。

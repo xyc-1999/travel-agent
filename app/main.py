@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from threading import Event
 from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException, Query
@@ -14,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import config
 from app.agents.requirement import analyze_requirement, apply_answers
-from app.export import build_doc_rtf, build_docx, build_markdown, build_pdf
+from app.export_service import render_export
 from app.models import (
     AnalyzeResponse,
     ClarifyRequest,
@@ -37,10 +39,12 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="行迹 · AI 多智能体旅行助手", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=list(config.CORS_ORIGINS),
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
+
+logger = logging.getLogger(__name__)
 
 
 @app.get("/api/health")
@@ -109,32 +113,56 @@ def generate(request: GenerateRequest) -> Itinerary:
 
 @app.post("/api/plan/generate/stream")
 async def generate_stream(request: GenerateRequest) -> StreamingResponse:
-    queue: asyncio.Queue = asyncio.Queue()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=16)
     loop = asyncio.get_running_loop()
+    cancel_event = Event()
 
     def worker() -> None:
         try:
-            for event in iter_generation(request.session_id):
-                loop.call_soon_threadsafe(queue.put_nowait, event)
-        except Exception as exc:  # noqa: BLE001
-            loop.call_soon_threadsafe(
-                queue.put_nowait,
-                {"event": "error", "data": {"message": f"生成失败：{type(exc).__name__}: {exc}"}},
-            )
+            for event in iter_generation(request.session_id, cancel_event):
+                if cancel_event.is_set():
+                    break
+                future = asyncio.run_coroutine_threadsafe(queue.put(event), loop)
+                while not cancel_event.is_set():
+                    try:
+                        future.result(timeout=0.2)
+                        break
+                    except TimeoutError:
+                        continue
+                    except RuntimeError:
+                        cancel_event.set()
+                        break
+        except Exception:  # noqa: BLE001
+            logger.exception("SSE itinerary generation failed; session_id=%s", request.session_id)
+            if not cancel_event.is_set():
+                future = asyncio.run_coroutine_threadsafe(
+                    queue.put({"event": "error", "data": {"message": "生成失败，请稍后重试。"}}), loop
+                )
+                try:
+                    future.result(timeout=1)
+                except (TimeoutError, RuntimeError):
+                    cancel_event.set()
         finally:
-            loop.call_soon_threadsafe(queue.put_nowait, None)
+            if not cancel_event.is_set():
+                try:
+                    asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=1)
+                except (TimeoutError, RuntimeError):
+                    cancel_event.set()
 
     import threading
 
     threading.Thread(target=worker, daemon=True).start()
 
     async def event_stream():
-        while True:
-            event = await queue.get()
-            if event is None:
-                break
-            payload = json.dumps(event["data"], ensure_ascii=False, default=str)
-            yield f"event: {event['event']}\ndata: {payload}\n\n"
+        try:
+            while True:
+                event = await queue.get()
+                if event is None:
+                    break
+                payload = json.dumps(event["data"], ensure_ascii=False, default=str)
+                yield f"event: {event['event']}\ndata: {payload}\n\n"
+        finally:
+            cancel_event.set()
 
     return StreamingResponse(
         event_stream(),
@@ -166,22 +194,11 @@ def export_trip(trip_id: str, format: str = Query(default="docx", pattern="^(doc
     if not itinerary:
         raise HTTPException(status_code=404, detail="行程不存在")
 
-    if format == "docx":
-        content = build_docx(itinerary)
-        media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    elif format == "doc":
-        content = build_doc_rtf(itinerary)
-        media_type = "application/msword"
-    elif format == "pdf":
-        content = build_pdf(itinerary)
-        media_type = "application/pdf"
-    else:
-        content = build_markdown(itinerary).encode("utf-8")
-        media_type = "text/markdown; charset=utf-8"
+    exported = render_export(itinerary, format)
 
     filename = f"{itinerary.destination}-{itinerary.days_count}天-行程.{format}"
     disposition = f"attachment; filename=\"itinerary.{format}\"; filename*=UTF-8''{quote(filename)}"
-    return Response(content=content, media_type=media_type, headers={"Content-Disposition": disposition})
+    return Response(content=exported.content, media_type=exported.media_type, headers={"Content-Disposition": disposition})
 
 
 static_dir = Path(config.STATIC_DIR)

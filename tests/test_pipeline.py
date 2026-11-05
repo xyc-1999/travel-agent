@@ -7,6 +7,7 @@ from app.agents.requirement import analyze_requirement
 from app.agents.verification import run_verification
 from app.models import BudgetSpec, RequirementInput
 from app.orchestrator import generate_itinerary
+from app.orchestrator import _build_tips, _source_label
 from app.services.weather import build_weather
 from app.storage import save_session
 
@@ -16,6 +17,36 @@ def _ready_itinerary(payload: RequirementInput):
     assert analysis.status == "ready", analysis.questions
     save_session(analysis.session_id, payload, analysis)
     return generate_itinerary(analysis.session_id)
+
+
+def test_mixed_weather_sources_are_explicitly_labeled():
+    from app.models import VerificationResult, WeatherDay
+
+    demo, label = _source_label(
+        VerificationResult(source_mode="amap_live"),
+        [
+            WeatherDay(date=date(2026, 12, 1), high=20, low=10, is_forecast=True),
+            WeatherDay(date=date(2026, 12, 2), high=19, low=9, is_forecast=False),
+        ],
+        llm_used=False,
+        has_guides=False,
+    )
+
+    assert demo is True
+    assert "和风天气预报 + 历史气候参考" in label
+
+
+def test_route_tip_discloses_approximate_travel_time():
+    from app.models import BudgetPlan, WeatherDay
+
+    tips = _build_tips(
+        RequirementInput(destination="成都"),
+        [WeatherDay(date=date(2026, 12, 1), high=20, low=10)],
+        BudgetPlan(),
+        "demo_catalog",
+    )
+
+    assert any("直线距离" in tip and "不是实时路网导航" in tip for tip in tips)
 
 
 def test_end_to_end_itinerary_is_structurally_valid(complete_payload: RequirementInput):
