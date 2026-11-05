@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import httpx
 
 from app import config
-from app.data_loader import city_coordinates, climate_for, normalize_city_name
+from app.data_loader import city_coordinates, climate_for
 from app.models import WeatherDay
 
 
@@ -53,27 +53,38 @@ def _climate_day(city: str, day: date) -> WeatherDay:
     )
 
 
+def _qweather_weather_url() -> str:
+    """按 API Host 规则返回 3 天天气预报地址。"""
+    host = config.QWEATHER_API_HOST.strip().rstrip("/")
+    if host:
+        if not host.startswith(("http://", "https://")):
+            host = f"https://{host}"
+        return f"{host}/v7/weather/3d"
+    return "https://devapi.qweather.com/v7/weather/3d"
+
+
+def _weather_location(city: str) -> str | None:
+    """用本地城市坐标请求天气，避免依赖 GeoAPI 权限。"""
+    coordinates = city_coordinates(city)
+    if not coordinates:
+        return None
+    lat, lng = coordinates
+    return f"{lng:.2f},{lat:.2f}"
+
+
 def _qweather_forecast(city: str, start: date, end: date) -> dict[date, WeatherDay]:
     if not config.QWEATHER_API_KEY or (end - start).days > 6:
         return {}
-    host = config.QWEATHER_API_HOST or "https://devapi.qweather.com"
-    geo_host = "https://geoapi.qweather.com"
+    location = _weather_location(city)
+    if not location:
+        return {}
+    weather_url = _qweather_weather_url()
     headers = {"Accept": "application/json"}
     try:
         with httpx.Client(timeout=config.QWEATHER_TIMEOUT_SECONDS, headers=headers) as client:
-            geo = client.get(
-                f"{geo_host}/v2/city/lookup",
-                params={"location": normalize_city_name(city), "key": config.QWEATHER_API_KEY},
-            )
-            if geo.status_code != 200:
-                return {}
-            locations = geo.json().get("location") or []
-            if not locations:
-                return {}
-            location_id = locations[0]["id"]
             response = client.get(
-                f"{host}/v7/weather/3d",
-                params={"location": location_id, "key": config.QWEATHER_API_KEY},
+                weather_url,
+                params={"location": location, "key": config.QWEATHER_API_KEY},
             )
             if response.status_code != 200:
                 return {}

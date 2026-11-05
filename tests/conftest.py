@@ -13,6 +13,10 @@ if str(ROOT) not in sys.path:
 # 测试使用独立的 D 盘数据库，避免污染演示数据
 os.environ["DATABASE_PATH"] = "data/test_app.db"
 
+# 测试固定走演示模式，避免开发机本地 .env 中的真实 Key 改变数据来源
+for _key in ("LLM_API_KEY", "AMAP_API_KEY", "QWEATHER_API_KEY"):
+    os.environ[_key] = ""
+
 import pytest  # noqa: E402
 
 from app import config  # noqa: E402
