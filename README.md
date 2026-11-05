@@ -78,7 +78,7 @@
 [7] export 行程导出（用户点击时生成 doc/docx/pdf/md）
 ```
 
-每个 Agent 通过明确的 Pydantic 输入/输出契约连接，而不是靠 prompt 角色扮演：
+每个 Agent 通过明确的 Pydantic 输入/输出模型连接，并由 `pipeline.py` 的 `StageOutcome` / `run_stage` 统一阶段事件与 trace，而不是靠 prompt 角色扮演：
 
 | Agent | 输入 | 输出 | 关键规则 |
 | --- | --- | --- | --- |
@@ -90,7 +90,9 @@
 | budget | 需求 + 行程 + 核验 | `BudgetPlan` | 分项求和、总额/人均换算、超支只给建议不改偏好 |
 | export | `Itinerary` | bytes | DOCX、RTF 容器 `.doc`、PDF（STSong-Light 中文字体）、Markdown |
 
-**扩展方式**：Agent 之间通过 typed model 解耦。新增“跨城市路线”“预订”等能力时增加阶段与模型即可，不需要改写已有 Agent；第一版没有提前实现这些阶段。
+**扩展方式**：Agent 之间通过 typed model 解耦，阶段执行统一走 `run_stage`。新增“跨城市路线”“预订”等能力时，在 `pipeline.py` 实现阶段并登记 `STAGE_META`，编排器只需调整调用顺序，不需要改写已有 Agent；第一版没有提前实现这些阶段。
+
+架构优化记录见 [docs/architecture-refactor-summary.md](docs/architecture-refactor-summary.md)。
 
 ---
 
@@ -100,7 +102,7 @@
 | --- | --- |
 | 前端 | HTML5、CSS3、原生 JavaScript（无框架、无构建步骤）；SSE 流式渲染；内联 SVG 路线草图 |
 | 后端 | Python 3、FastAPI、Uvicorn、Pydantic v2 |
-| Agent 编排 | 自研六阶段流水线，typed 输入/输出模型 + `AgentTrace` 可观测记录 |
+| Agent 编排 | 自研六阶段流水线（`pipeline.py` 统一阶段契约与事件）+ typed 输入/输出模型 + `AgentTrace` 可观测记录 |
 | 数据层 | JSON 示例数据（地点/城市/气候/攻略）、SQLite（标准库 `sqlite3`，会话与行程） |
 | 导出 | python-docx（`.docx`）、ReportLab + STSong-Light（`.pdf`）、RTF 容器（`.doc`）、Markdown |
 | 外部服务（可选） | OpenAI 兼容 HTTP 接口（文案润色）、高德 POI、和风天气 |
@@ -229,6 +231,7 @@ $env:PIP_CACHE_DIR = "d:\Courses\travel-agent\.pip-cache"
   - 端到端行程结构、时间轴不倒挂、预算分项求和
   - 雨天室内适配记录、必去不被替换、超预算透明建议、无预算不误判
   - 必去未匹配、避开别名过滤、未覆盖城市显式不可用
+  - 阶段契约边界：`agent_start` 先于 `agent_done`、trace 状态与耗时、示例库/高德/不可用三种地点来源、分页总数不被 `limit` 截断
   - DOCX 为合法 Word 包、PDF 可解析、`.doc` 为纯 ASCII RTF、Markdown 完整
   - API health/meta、澄清后生成、404、导出、SSE 六 Agent 顺序
 - `scripts/smoke.py` 实际输出：
