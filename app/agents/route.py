@@ -168,6 +168,14 @@ def _hotel_for(draft: RequirementInput, hotels: list[Place]) -> Place | None:
         inns = [hotel for hotel in hotels if "民宿" in hotel.tags or "民宿" in hotel.name]
         if inns:
             return inns[0]
+    # 实时 POI 往往不带档次标签：优先选择有真实参考价的酒店，
+    # 取价格中位数，避免因选中未获取房价的酒店而让住宿费用失真。
+    priced = sorted(
+        (hotel for hotel in hotels if hotel.price_known and hotel.price_per_night > 0),
+        key=lambda hotel: hotel.price_per_night,
+    )
+    if priced:
+        return priced[len(priced) // 2]
     return hotels[0]
 
 
@@ -283,6 +291,8 @@ def run_route_planning(
                         "catalog_checked",
                     ),
                     tags=place.tags,
+                    price_known=place.price_known,
+                    hours_known=place.hours_known,
                 )
             )
             current_minutes = visit_end
@@ -330,6 +340,8 @@ def run_route_planning(
                         "catalog_checked",
                     ),
                     tags=lunch.tags,
+                    price_known=lunch.price_known,
+                    hours_known=lunch.hours_known,
                 )
             )
             current_minutes = lunch_end
@@ -388,6 +400,8 @@ def run_route_planning(
                         "catalog_checked",
                     ),
                     tags=place.tags,
+                    price_known=place.price_known,
+                    hours_known=place.hours_known,
                 )
             )
             current_minutes = visit_end
@@ -435,6 +449,8 @@ def run_route_planning(
                         "catalog_checked",
                     ),
                     tags=dinner.tags,
+                    price_known=dinner.price_known,
+                    hours_known=dinner.hours_known,
                 )
             )
             current_minutes = dinner_end
@@ -466,7 +482,11 @@ def run_route_planning(
                     duration_minutes=0,
                     cost=hotel.price_per_night,
                     cost_basis="per_room",
-                    note=f"住宿 · {hotel.level or '未标注档次'}（每间每晚示例价）",
+                    note=(
+                        f"住宿 · {hotel.level or '未标注档次'}（每间每晚参考价）"
+                        if hotel.price_known
+                        else f"住宿 · {hotel.level or '未标注档次'}（房价未获取，0 元不代表免费，预算未计入）"
+                    ),
                     address=hotel.address,
                     lat=hotel.lat,
                     lng=hotel.lng,
@@ -476,6 +496,8 @@ def run_route_planning(
                         "catalog_checked",
                     ),
                     tags=hotel.tags,
+                    price_known=hotel.price_known,
+                    hours_known=hotel.hours_known,
                 )
             )
 

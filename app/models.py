@@ -95,6 +95,8 @@ class Place(BaseModel):
     cuisine: list[str] = Field(default_factory=list)
     description: str = ""
     source: str = "demo_catalog"
+    price_known: bool = True
+    hours_known: bool = True
 
 
 class PlaceCheck(BaseModel):
@@ -166,6 +168,8 @@ class ScheduleItem(BaseModel):
     verification_level: str | None = None
     must_visit: bool = False
     tags: list[str] = Field(default_factory=list)
+    price_known: bool = True
+    hours_known: bool = True
 
 
 class DayPlan(BaseModel):
@@ -199,6 +203,8 @@ class BudgetPlan(BaseModel):
     tolerance_amount: float = 0.0
     within_tolerance: bool = True
     adjustments: list[str] = Field(default_factory=list)
+    completeness: Literal["complete", "partial"] = "complete"
+    unknown_prices: list[str] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
 

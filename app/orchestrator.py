@@ -26,7 +26,7 @@ from app.pipeline import (
     verification_stage,
     weather_stage,
 )
-from app.services.llm import generate_narrative
+from app.services.llm import generate_summary
 from app.storage import get_session, save_trip
 
 
@@ -34,11 +34,16 @@ class PipelineError(RuntimeError):
     pass
 
 
-def _source_label(verification: VerificationResult, weather_days: list[WeatherDay], llm_used: bool) -> tuple[bool, str]:
+def _source_label(
+    verification: VerificationResult,
+    weather_days: list[WeatherDay],
+    llm_used: bool,
+    has_guides: bool,
+) -> tuple[bool, str]:
     parts: list[str] = []
     demo = False
     if verification.source_mode == "amap_live":
-        parts.append("高德实时 POI（价格/营业时间未核验）")
+        parts.append("高德实时 POI（参考价/营业时间按高德字段，缺失标注未获取）")
     else:
         parts.append("内置示例地点库")
         demo = True
@@ -47,16 +52,26 @@ def _source_label(verification: VerificationResult, weather_days: list[WeatherDa
     else:
         parts.append("历史气候参考")
         demo = True
-    parts.append("本地示例攻略")
-    demo = True
+    if has_guides:
+        parts.append("本地示例攻略")
+        demo = True
     if llm_used:
         parts.append("大模型文案润色")
     return demo, " + ".join(parts)
 
 
-def _default_summary(draft: RequirementInput, itinerary_days: int, total: float, per_person: float) -> str:
+def _default_summary(
+    draft: RequirementInput,
+    itinerary_days: int,
+    total: float,
+    per_person: float,
+    completeness: str = "complete",
+) -> str:
     interests = "、".join(draft.interests) if draft.interests else "核心景点与城市漫步"
-    budget_text = f"预算估算 {total:.0f} 元（人均 {per_person:.0f} 元）"
+    label = "已知费用合计" if completeness == "partial" else "预算估算"
+    budget_text = f"{label} {total:.0f} 元（人均 {per_person:.0f} 元）"
+    if completeness == "partial":
+        budget_text += "，不含未获取价格，0 元不代表免费"
     return (
         f"{draft.start_date.isoformat()} 至 {draft.end_date.isoformat()}，"
         f"{draft.destination} {itinerary_days} 天 {draft.travelers} 人，"
@@ -64,11 +79,19 @@ def _default_summary(draft: RequirementInput, itinerary_days: int, total: float,
     )
 
 
-def _build_tips(draft: RequirementInput, weather_days: list[WeatherDay], budget: BudgetPlan) -> list[str]:
+def _build_tips(
+    draft: RequirementInput,
+    weather_days: list[WeatherDay],
+    budget: BudgetPlan,
+    source_mode: str,
+) -> list[str]:
     tips = [
-        "博物馆、热门景区通常需要提前预约，出发前请在官方渠道复核开放时间与闭馆日。",
-        "行程中的票价、营业时间与住宿价格为示例或规则估算，不是实时报价。",
+        "热门景区与博物馆的预约要求、开放时间请以官方渠道为准，本系统不提供预约结论。",
     ]
+    if source_mode == "amap_live":
+        tips.append("名称、地址、坐标与可获取的参考价来自高德实时 POI；未提供的价格标注为未获取，0 元不代表免费。")
+    else:
+        tips.append("当前使用内置示例地点库，票价与营业时间为演示数据，不是实时报价。")
     bad_days = [day for day in weather_days if not day.outdoor_ok]
     if bad_days:
         dates = "、".join(day.date.strftime("%m-%d") for day in bad_days[:3])
@@ -158,32 +181,40 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
             f"超出预算 {budget.over_budget_amount:.0f} 元"
             f"（{budget.tolerance_amount:.0f} 元容差，{'已控制在容差内' if budget.within_tolerance else '仍超过容差'}）。"
         )
+    if budget.completeness == "partial":
+        warnings.append(
+            f"高德未提供{'、'.join(budget.unknown_prices)}价格，预算仅汇总已获取费用；0 元不代表免费，请按实际报价核实。"
+        )
 
     # 文案与来源
     facts = "\n".join(
         [
             f"目的地：{draft.destination}；日期：{draft.start_date} 至 {draft.end_date}；人数：{draft.travelers}；节奏：{draft.pace}",
-            f"预算：总估算 {budget.total:.0f} 元，人均 {budget.per_person:.0f} 元，状态 {budget.budget_status}",
+            f"预算：{'已知费用合计' if budget.completeness == 'partial' else '估算总花费'} {budget.total:.0f} 元，人均 {budget.per_person:.0f} 元，状态 {budget.budget_status}",
             *[
                 f"第{day.day_index}天 {day.date} {day.theme}：" + "、".join(item.name for item in day.items if item.kind == "attraction")
                 for day in days
             ],
         ]
     )
-    fallback_summary = _default_summary(draft, len(days), budget.total, budget.per_person)
-    narrative = generate_narrative(facts, fallback_summary)
-    llm_used = narrative is not None
-    summary, narrative_tips = narrative if narrative else (fallback_summary, [])
-    tips = narrative_tips or _build_tips(draft, weather_days, budget)
+    fallback_summary = _default_summary(
+        draft, len(days), budget.total, budget.per_person, budget.completeness
+    )
+    llm_summary = generate_summary(facts, fallback_summary)
+    llm_used = llm_summary is not None
+    summary = llm_summary or fallback_summary
+    tips = _build_tips(draft, weather_days, budget, verification.source_mode)
 
-    demo_mode, data_mode_label = _source_label(verification, weather_days, llm_used)
+    demo_mode, data_mode_label = _source_label(
+        verification, weather_days, llm_used, bool(research.snippets)
+    )
     sources: list[SourceRef] = []
     if verification.source_mode == "amap_live":
         sources.append(
             SourceRef(
                 type="place",
                 title="高德地图 POI 检索",
-                detail="名称、地址、坐标来自高德；营业时间与价格未核验。",
+                detail="名称、地址、坐标来自高德；营业时间与参考价仅在字段存在时采用，未提供的价格标注为未获取。",
                 level="live_poi",
                 verified=True,
             )
@@ -228,18 +259,22 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
                 verified=False,
             )
         )
+    if verification.source_mode == "amap_live":
+        budget_detail = "餐饮/住宿优先采用高德返回的参考价，未提供的价格不计为 0 元；交通与早餐按规则估算。"
+    else:
+        budget_detail = "按示例票价、餐饮均价、住宿示例价与交通规则计算，不是实时报价。"
     sources.append(
         SourceRef(
             type="budget",
             title="规则估算",
-            detail="按示例票价、餐饮均价、住宿示例价与交通规则计算。",
+            detail=budget_detail,
             level="rule_estimate",
             verified=False,
         )
     )
     if llm_used:
         sources.append(
-            SourceRef(type="llm", title="大模型文案", detail="仅润色概述与提示，未生成地点事实。", level="llm", verified=False)
+            SourceRef(type="llm", title="大模型文案", detail="仅使用已给出的结构化事实润色概述，不生成提示或外部数据。", level="llm", verified=False)
         )
 
     itinerary = Itinerary(

@@ -67,53 +67,60 @@ def _compose_budget(
     days: list[DayPlan],
     intercity_total: float,
     intercity_detail: str,
-) -> tuple[list[BudgetLine], float, float]:
-    """按当前行程与交通方案重新计算完整预算。"""
+) -> tuple[list[BudgetLine], float, float, set[str]]:
+    """按当前行程与交通方案重新计算完整预算，并记录哪些价格未获取。"""
     travelers = draft.travelers or 1
     rooms = max(1, math.ceil(travelers / 2))
     day_count = len(days)
+    unknown: set[str] = set()
 
-    ticket_total = sum(
-        item.cost * travelers
-        for day in days
-        for item in day.items
-        if item.kind == "attraction"
-    )
-    meal_total = sum(
-        item.cost * travelers
-        for day in days
-        for item in day.items
-        if item.kind == "meal"
-    )
+    ticket_total = 0.0
+    meal_total = 0.0
+    hotel_total = 0.0
+    local_transport = 0.0
+    hotel_items: list[ScheduleItem] = []
+    for day in days:
+        local_transport += sum(leg.cost for leg in day.legs)
+        for item in day.items:
+            if item.kind == "attraction":
+                ticket_total += item.cost * travelers
+                if not item.price_known:
+                    unknown.add("门票")
+            elif item.kind == "meal":
+                meal_total += item.cost * travelers
+                if not item.price_known:
+                    unknown.add("餐饮")
+            elif item.kind == "hotel":
+                hotel_items.append(item)
+                hotel_total += item.cost * rooms
+                if not item.price_known:
+                    unknown.add("住宿")
+
     breakfast_total = 25 * travelers * day_count
-    hotel_items = [item for day in days for item in day.items if item.kind == "hotel"]
-    hotel_total = sum(item.cost * rooms for item in hotel_items)
-    local_transport = sum(leg.cost for day in days for leg in day.legs)
-
     subtotal = ticket_total + meal_total + breakfast_total + hotel_total + local_transport + intercity_total
     other_total = round(subtotal * OTHER_RATE, 2)
 
+    hotel_detail = f"{len(hotel_items)} 晚 × {rooms} 间" if hotel_items else "未安排住宿"
+    if "住宿" in unknown:
+        hotel_detail += "（房价未获取，0 元不代表免费）"
+    meal_detail = f"含正餐与早餐/饮水（{travelers} 人 × {day_count} 天）"
+    if "餐饮" in unknown:
+        meal_detail += "（部分餐厅人均未获取，0 元不代表免费）"
+    ticket_detail = "按已核验景点的票价"
+    if "门票" in unknown:
+        ticket_detail = "高德未提供票价，0 元不代表免费，需自行核实"
+
     lines = [
         BudgetLine(key="intercity", label="往返大交通", amount=round(intercity_total, 2), detail=intercity_detail),
-        BudgetLine(
-            key="hotel",
-            label="住宿",
-            amount=round(hotel_total, 2),
-            detail=f"{len(hotel_items)} 晚 × {rooms} 间" if hotel_items else "未安排住宿",
-        ),
-        BudgetLine(
-            key="meals",
-            label="餐饮",
-            amount=round(meal_total + breakfast_total, 2),
-            detail=f"含正餐与早餐/饮水（{travelers} 人 × {day_count} 天）",
-        ),
-        BudgetLine(key="tickets", label="门票", amount=round(ticket_total, 2), detail="按已核验景点的示例票价"),
+        BudgetLine(key="hotel", label="住宿", amount=round(hotel_total, 2), detail=hotel_detail),
+        BudgetLine(key="meals", label="餐饮", amount=round(meal_total + breakfast_total, 2), detail=meal_detail),
+        BudgetLine(key="tickets", label="门票", amount=round(ticket_total, 2), detail=ticket_detail),
         BudgetLine(key="local_transport", label="市内交通", amount=round(local_transport, 2), detail="按实际编排路线估算"),
         BudgetLine(key="other", label="机动与其他", amount=other_total, detail=f"按小计 {int(OTHER_RATE * 100)}% 预留"),
     ]
     total = round(sum(line.amount for line in lines), 2)
     per_person = round(total / travelers, 2) if travelers else total
-    return lines, total, per_person
+    return lines, total, per_person, unknown
 
 
 def _replace_hotel(
@@ -134,8 +141,10 @@ def _replace_hotel(
         item.lat = hotel.lat
         item.lng = hotel.lng
         item.tags = list(hotel.tags)
-        item.note = f"住宿 · {hotel.level or '未标注档次'}（每间每晚示例价，已按预算容差调整）"
+        item.note = f"住宿 · {hotel.level or '未标注档次'}（每间每晚参考价，已按预算容差调整）"
         item.verification_level = level
+        item.price_known = True
+        item.hours_known = True
 
 
 def run_budget(
@@ -147,11 +156,14 @@ def run_budget(
     rooms = max(1, math.ceil(travelers / 2))
 
     intercity_total, intercity_detail = _intercity_estimate(draft)
-    lines, total, per_person = _compose_budget(draft, days, intercity_total, intercity_detail)
+    lines, total, per_person, unknown_prices = _compose_budget(draft, days, intercity_total, intercity_detail)
     original_total = total
 
     limit_total: float | None = None
-    assumptions: list[str] = ["票价、餐饮与住宿均来自示例地点库或规则估算，不是实时价格。"]
+    if verification.source_mode == "amap_live":
+        assumptions: list[str] = ["费用优先采用高德返回的参考价；高德未提供的价格不会按 0 元视为免费。"]
+    else:
+        assumptions = ["票价、餐饮与住宿均来自示例地点库或规则估算，不是实时价格。"]
     if draft.budget.amount is not None and draft.budget.basis:
         if draft.budget.basis == "per_person":
             limit_total = round(draft.budget.amount * travelers, 2)
@@ -175,7 +187,7 @@ def run_budget(
                 previous_cost = intercity_total
                 saved = round(previous_cost - best_cost, 2)
                 intercity_total, intercity_detail = best_cost, best_detail
-                lines, total, per_person = _compose_budget(draft, days, intercity_total, intercity_detail)
+                lines, total, per_person, unknown_prices = _compose_budget(draft, days, intercity_total, intercity_detail)
                 adjustments.append(
                     f"为把超支控制在 {BUDGET_TOLERANCE:.0f} 元以内，往返交通由原方案（{previous_cost:.0f} 元）改为{best_mode}（{best_cost:.0f} 元），约省 {saved:.0f} 元。"
                 )
@@ -195,7 +207,7 @@ def run_budget(
                     nights = len(hotel_items)
                     saved = round((current_cost - cheapest.price_per_night) * rooms * nights, 2)
                     _replace_hotel(hotel_items, cheapest, verification)
-                    lines, total, per_person = _compose_budget(draft, days, intercity_total, intercity_detail)
+                    lines, total, per_person, unknown_prices = _compose_budget(draft, days, intercity_total, intercity_detail)
                     adjustments.append(
                         f"为满足预算容差，住宿由「{old_name}」（{current_cost:.0f} 元/间/晚）调整为「{cheapest.name}」（{cheapest.price_per_night:.0f} 元/间/晚），{nights} 晚 × {rooms} 间，约省 {saved:.0f} 元。"
                     )
@@ -209,6 +221,11 @@ def run_budget(
             f"原方案估算 {original_total:.0f} 元"
             + (f"，超出预算 {initial_over:.0f} 元" if initial_over > 0 else "")
             + f"；预算适配后估算 {total:.0f} 元。",
+        )
+
+    if unknown_prices:
+        assumptions.append(
+            f"未获取价格：{'、'.join(sorted(unknown_prices))}；预算仅汇总已获取费用，0 元不代表免费，需按实际报价核实。"
         )
 
     if limit_total is None:
@@ -252,6 +269,8 @@ def run_budget(
         tolerance_amount=round(BUDGET_TOLERANCE, 2) if limit_total is not None else 0.0,
         within_tolerance=within_tolerance,
         adjustments=adjustments,
+        completeness="partial" if unknown_prices else "complete",
+        unknown_prices=sorted(unknown_prices),
         suggestions=suggestions,
         assumptions=assumptions,
     )

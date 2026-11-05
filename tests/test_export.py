@@ -53,3 +53,25 @@ def test_markdown_contains_budget_and_days(sample_itinerary: Itinerary):
     assert "## 预算" in text
     assert "## 每日行程" in text
     assert "数据来源" in text
+
+
+def test_export_marks_partial_budget(sample_itinerary: Itinerary):
+    budget = sample_itinerary.budget.model_copy(
+        update={"completeness": "partial", "unknown_prices": ["门票", "住宿"]}
+    )
+    itinerary = sample_itinerary.model_copy(update={"budget": budget})
+
+    markdown = build_markdown(itinerary)
+    assert "已知费用合计" in markdown
+    assert "门票、住宿" in markdown
+    assert "0 元不代表免费" in markdown
+
+    docx = build_docx(itinerary)
+    with zipfile.ZipFile(io.BytesIO(docx)) as archive:
+        document_xml = archive.read("word/document.xml").decode("utf-8")
+    assert "已知费用合计" in document_xml
+    assert "数据完整度" in document_xml
+
+    rtf = build_doc_rtf(itinerary).decode("ascii")
+    assert "\\u" in rtf
+

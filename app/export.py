@@ -37,9 +37,10 @@ def _weather_text(day) -> str:
 
 def _budget_status_text(itinerary: Itinerary) -> str:
     budget = itinerary.budget
+    prefix = "已知费用口径 · " if budget.completeness == "partial" else ""
     if budget.budget_status == "ok":
         limit_text = f"（预算上限 {_money(budget.limit_total)}）" if budget.limit_total is not None else ""
-        return f"预算内，剩余 {_money(budget.remaining or 0)}{limit_text}"
+        return f"{prefix}预算内，剩余 {_money(budget.remaining or 0)}{limit_text}"
     if budget.budget_status == "over_budget":
         tolerance_text = (
             f"{_money(budget.tolerance_amount)}容差内"
@@ -47,8 +48,23 @@ def _budget_status_text(itinerary: Itinerary) -> str:
             else f"超过 {_money(budget.tolerance_amount)}容差"
         )
         limit_text = f"预算上限 {_money(budget.limit_total)}；" if budget.limit_total is not None else ""
-        return f"超出预算 {_money(budget.over_budget_amount)}（{limit_text}{tolerance_text}）"
-    return "未设置预算上限"
+        return f"{prefix}超出预算 {_money(budget.over_budget_amount)}（{limit_text}{tolerance_text}）"
+    return f"{prefix}未设置预算上限"
+
+
+def _budget_total_label(itinerary: Itinerary) -> str:
+    return "已知费用合计" if itinerary.budget.completeness == "partial" else "合计"
+
+
+def _budget_completeness_text(itinerary: Itinerary) -> str:
+    budget = itinerary.budget
+    if budget.completeness != "partial":
+        return "数据完整度：本单所有费用项均来自已获取的价格数据。"
+    unknown = "、".join(budget.unknown_prices) or "部分项目"
+    return (
+        f"数据完整度：部分价格未获取（{unknown}）。合计为已获取价格之和，"
+        "不含未获取费用；0 元不代表免费，请按实际报价核实。"
+    )
 
 
 def _item_lines(itinerary: Itinerary) -> list[str]:
@@ -90,9 +106,11 @@ def build_markdown(itinerary: Itinerary) -> str:
         lines.append(f"| {line.label} | {_money(line.amount)} | {line.detail} |")
     lines.extend(
         [
-            f"| **合计** | **{_money(itinerary.budget.total)}** | 人均 {_money(itinerary.budget.per_person)} |",
+            f"| **{_budget_total_label(itinerary)}** | **{_money(itinerary.budget.total)}** | 人均 {_money(itinerary.budget.per_person)} |",
             "",
             f"预算状态：{_budget_status_text(itinerary)}",
+            "",
+            _budget_completeness_text(itinerary),
             "",
         ]
     )
@@ -166,9 +184,14 @@ def build_docx(itinerary: Itinerary) -> bytes:
         cells[1].text = _money(line.amount)
         cells[2].text = line.detail
     total_row = table.add_row().cells
-    total_row[0].text = "合计"
+    total_row[0].text = _budget_total_label(itinerary)
     total_row[1].text = _money(itinerary.budget.total)
     total_row[2].text = f"人均 {_money(itinerary.budget.per_person)}；{_budget_status_text(itinerary)}"
+
+    note = document.add_paragraph(_budget_completeness_text(itinerary))
+    if itinerary.budget.completeness == "partial":
+        note.runs[0].bold = True
+        note.runs[0].font.color.rgb = RGBColor(0xA8, 0x4A, 0x1F)
 
     if itinerary.budget.suggestions:
         document.add_heading("预算建议", level=2)
@@ -289,7 +312,7 @@ def build_pdf(itinerary: Itinerary) -> bytes:
     table_data = [["项目", "金额", "说明"]]
     for line in itinerary.budget.lines:
         table_data.append([line.label, _money(line.amount), line.detail])
-    table_data.append(["合计", _money(itinerary.budget.total), f"人均 {_money(itinerary.budget.per_person)}；{_budget_status_text(itinerary)}"])
+    table_data.append([_budget_total_label(itinerary), _money(itinerary.budget.total), f"人均 {_money(itinerary.budget.per_person)}；{_budget_status_text(itinerary)}"])
     table = Table(table_data, colWidths=[30 * mm, 30 * mm, 110 * mm], repeatRows=1)
     table.setStyle(
         TableStyle(
@@ -309,6 +332,7 @@ def build_pdf(itinerary: Itinerary) -> bytes:
         )
     )
     story.append(table)
+    story.append(Paragraph(escape(_budget_completeness_text(itinerary)), styles["small"]))
     if itinerary.budget.suggestions:
         story.append(Paragraph("预算建议", styles["h2"]))
         for suggestion in itinerary.budget.suggestions:
@@ -394,7 +418,8 @@ def build_doc_rtf(itinerary: Itinerary) -> bytes:
     ]
     for line in itinerary.budget.lines:
         lines.append(f"{line.label}：{_money(line.amount)}　{line.detail}")
-    lines.append(f"合计：{_money(itinerary.budget.total)}；人均 {_money(itinerary.budget.per_person)}；{_budget_status_text(itinerary)}")
+    lines.append(f"{_budget_total_label(itinerary)}：{_money(itinerary.budget.total)}；人均 {_money(itinerary.budget.per_person)}；{_budget_status_text(itinerary)}")
+    lines.append(_budget_completeness_text(itinerary))
     if itinerary.budget.suggestions:
         lines.append("预算建议：")
         lines.extend(f"- {item}" for item in itinerary.budget.suggestions)

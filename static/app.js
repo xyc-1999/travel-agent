@@ -426,13 +426,19 @@
       const verify = item.verification_level
         ? `<span class="ti-tag ${item.verification_level === "live_poi" ? "" : "warn"}">${item.verification_level === "live_poi" ? "实时POI" : "示例库核验"}</span>`
         : "";
+      const costKnown = item.price_known === false
+        ? `<span class="ti-tag warn">价格未获取</span>`
+        : "";
+      const hoursKnown = item.hours_known === false
+        ? `<span class="ti-tag warn">时间未获取</span>`
+        : "";
       return `
         <div class="timeline-item ${item.kind}">
           <div class="ti-time">${esc(item.start_time)}<br />${esc(item.end_time)}</div>
           <div class="ti-main">
             <h5>${esc(item.name)}</h5>
             ${item.note ? `<p>${esc(item.note)}</p>` : ""}
-            <div class="ti-tags">${must}${tags}${indoor}${verify}</div>
+            <div class="ti-tags">${must}${tags}${indoor}${verify}${costKnown}${hoursKnown}</div>
           </div>
           <div class="ti-cost">${item.cost ? money(item.cost) : ""}</div>
         </div>`;
@@ -464,11 +470,12 @@
 
   const renderBudget = (itinerary) => {
     const budget = itinerary.budget;
-    const statusText = budget.budget_status === "ok"
+    const partial = budget.completeness === "partial";
+    const statusText = (partial ? "已知费用口径 · " : "") + (budget.budget_status === "ok"
       ? `预算内 · 剩余 ${money(budget.remaining || 0)}${budget.limit_total ? ` · 预算 ${money(budget.limit_total)}` : ""}`
       : budget.budget_status === "over_budget"
         ? `超出预算 ${money(budget.over_budget_amount)}${budget.limit_total ? ` · 预算 ${money(budget.limit_total)}` : ""} · ${budget.within_tolerance ? `${money(budget.tolerance_amount)}容差内` : `超过 ${money(budget.tolerance_amount)}容差`}`
-        : "未设置预算上限 · 仅做估算";
+        : "未设置预算上限 · 仅做估算");
     const statusClass = budget.budget_status === "over_budget" ? "over" : budget.budget_status === "ok" ? "" : "empty";
     const adjustments = (budget.adjustments || []).length
       ? `<div class="budget-adjust"><h4>预算适配记录</h4><ul class="note-list">${budget.adjustments.map((item) => `<li>${esc(item)}</li>`).join("")}</ul></div>`
@@ -487,16 +494,21 @@
     const suggestions = budget.suggestions.length
       ? `<ul class="note-list">${budget.suggestions.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`
       : "";
+    const totalLabel = partial ? "已知费用合计" : "合计";
+    const completeness = partial
+      ? `<div class="budget-partial">数据完整度：部分价格未获取（${esc((budget.unknown_prices || []).join("、"))}）。合计为已获取价格之和，不含未获取费用；0 元不代表免费，请按实际报价核实。</div>`
+      : `<div class="budget-partial ok">数据完整度：本单所有费用项均来自已获取的价格数据。</div>`;
     return `
       <div class="section">
         <h3>预算明细</h3>
         <div class="budget-status ${statusClass}">${esc(statusText)}</div>
+        ${completeness}
         ${adjustments}
         <div class="budget-bars">${bars}</div>
         <table class="budget-table">
           <thead><tr><th>项目</th><th>金额</th><th>说明</th></tr></thead>
           <tbody>${rows}
-            <tr class="total"><td>合计</td><td>${money(budget.total)}</td><td>人均 ${money(budget.per_person)}</td></tr>
+            <tr class="total"><td>${totalLabel}</td><td>${money(budget.total)}</td><td>人均 ${money(budget.per_person)}</td></tr>
           </tbody>
         </table>
         ${suggestions}
@@ -554,7 +566,7 @@
       <div class="stat-grid">
         <div class="stat"><span>行程天数</span><strong>${esc(itinerary.days_count)}<small> 天</small></strong></div>
         <div class="stat"><span>出行人数</span><strong>${esc(itinerary.travelers)}<small> 人</small></strong></div>
-        <div class="stat ${itinerary.budget.budget_status === "over_budget" ? "over" : ""}"><span>估算总花费</span><strong>${Math.round(itinerary.budget.total).toLocaleString("zh-CN")}<small> 元</small></strong><small>${esc(budgetNote)}</small></div>
+        <div class="stat ${itinerary.budget.budget_status === "over_budget" ? "over" : ""}"><span>${itinerary.budget.completeness === "partial" ? "已知费用合计" : "估算总花费"}</span><strong>${Math.round(itinerary.budget.total).toLocaleString("zh-CN")}<small> 元</small></strong><small>${esc(budgetNote)}${itinerary.budget.completeness === "partial" ? " · 未含未获取价格" : ""}</small></div>
         <div class="stat"><span>人均估算</span><strong>${Math.round(itinerary.budget.per_person).toLocaleString("zh-CN")}<small> 元</small></strong></div>
       </div>
 

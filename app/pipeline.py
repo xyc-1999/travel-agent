@@ -185,12 +185,14 @@ def budget_stage(
         details.append(f"预算上限 {budget.limit_total:.0f} 元，容差 {budget.tolerance_amount:.0f} 元")
     if budget.over_budget_amount > 0:
         details.append(f"超出预算 {budget.over_budget_amount:.0f} 元（{'容差内' if budget.within_tolerance else '超过容差'}）")
+    if budget.completeness == "partial":
+        details.append(f"未获取价格：{'、'.join(budget.unknown_prices)}（0 元不代表免费，未计入总估算）")
     details.extend(budget.adjustments)
     details.extend(budget.suggestions[:3])
     return StageOutcome(
         value=budget,
-        summary="完成分项预算与预算容差校验",
+        summary="完成分项预算与预算容差校验" + ("，部分价格未获取" if budget.completeness == "partial" else ""),
         details=details,
-        status="warning" if budget.budget_status == "over_budget" or budget.adjustments else "done",
+        status="warning" if budget.budget_status == "over_budget" or budget.adjustments or budget.completeness == "partial" else "done",
         assumptions=list(budget.assumptions),
     )

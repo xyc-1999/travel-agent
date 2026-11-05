@@ -46,9 +46,13 @@ def _to_verified(place: Place, source_mode: str) -> PlaceCheck:
         checks.extend(["开放时间已记录（示例值）", "票价/价格已记录（示例值）"])
         warnings.append("来自内置示例地点库，只完成一致性校验，不代表实时营业状态。")
     else:
-        warnings.append("来自高德实时 POI；营业时间、票价和价格未核验。")
-        if place.open_time == "00:00" and place.close_time == "23:59":
-            warnings.append("营业时间未知，排期按常规时段假设。")
+        checks.extend(
+            [
+                "名称/地址/坐标来自高德",
+                "参考价来自高德字段" if place.price_known else "价格未获取（0 元不代表免费）",
+                "营业时间来自高德字段" if place.hours_known else "营业时间未获取",
+            ]
+        )
     if not place.address:
         warnings.append("缺少详细地址。")
     return PlaceCheck(place=place, level=("catalog_checked" if source_mode == "demo_catalog" else "live_poi"), checks=checks, warnings=warnings)
@@ -72,6 +76,11 @@ def run_verification(draft: RequirementInput) -> VerificationResult:
 
     if not places:
         return VerificationResult(warnings=warnings, source_mode=source_mode)
+
+    if source_mode == "amap_live":
+        unknown_hours = [check.place for check in places if not check.place.hours_known]
+        if unknown_hours:
+            warnings.append(f"高德未提供 {len(unknown_hours)} 个地点的营业时间，时间轴按常规时段假设。")
 
     days: list[date] = []
     if draft.start_date and draft.end_date:
