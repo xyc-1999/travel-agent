@@ -6,6 +6,7 @@ from datetime import date, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
+from app import config
 from app.main import app
 
 
@@ -40,6 +41,8 @@ def test_health_and_meta(client: TestClient, trip_start: date):
     assert meta.status_code == 200
     body = meta.json()
     assert "成都" in body["supported_cities"]
+    assert body["destination_cities"] == body["supported_cities"]
+    assert "长沙" not in body["destination_cities"]
     assert body["demo_mode"] is True
     assert body["data_policy"]
 
@@ -152,6 +155,15 @@ def test_sse_stream_emits_all_agents_in_order(client: TestClient, trip_start: da
     assert events[-1] == "result"
     assert result_payload is not None
     assert result_payload["destination"] == "成都"
+
+
+def test_meta_expands_destinations_when_amap_is_configured(client: TestClient, monkeypatch):
+    monkeypatch.setattr(config, "AMAP_API_KEY", "test-key")
+
+    body = client.get("/api/meta").json()
+
+    assert "长沙" in body["destination_cities"]
+    assert len(body["destination_cities"]) > len(body["supported_cities"])
 
 
 def test_meta_declares_demo_scope(client: TestClient):

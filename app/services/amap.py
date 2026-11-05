@@ -14,8 +14,30 @@ CATEGORY_CONFIG = {
     "hotel": {"types": "100000", "keywords": "酒店"},
 }
 
+# 按用户住宿偏好分别检索，避免不同偏好得到同一批酒店
+HOTEL_KEYWORDS = {
+    "经济型": "经济型酒店",
+    "舒适型": "舒适型酒店",
+    "豪华型": "豪华酒店",
+    "民宿": "民宿",
+}
+
 _TIME_PATTERN = re.compile(r"(\d{1,2}):(\d{2})")
 _WEEKDAY_INDEX = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "日": 7, "天": 7}
+
+
+def _hotel_level(poi_type: str, name: str) -> str:
+    """仅依据高德 POI 类型/名称中明确出现的星级或酒店类型判断档次，不臆测。"""
+    text = f"{poi_type} {name}"
+    if any(word in text for word in ("五星", "5星", "四星", "4星")):
+        return "豪华型"
+    if any(word in text for word in ("三星", "3星")):
+        return "舒适型"
+    if any(word in text for word in ("二星", "2星", "经济型", "连锁")):
+        return "经济型"
+    if "民宿" in text:
+        return "民宿"
+    return ""
 
 
 def _parse_closed_weeks(raw: str) -> list[int]:
@@ -103,8 +125,13 @@ def _build_place(city: str, poi: dict, category: str) -> Place | None:
     else:
         notes.append("高德未提供营业时间，时间轴按常规时段计划，出发前请核实")
     closed_weeks = _parse_closed_weeks(raw_hours)
-    if price_known:
-        label = {"food": "参考人均", "hotel": "参考最低价"}.get(category, "参考消费")
+    if category == "hotel":
+        if price_known:
+            notes.append(f"高德参考最低价 {price:.0f} 元/间/晚（具体房型以预订平台为准）")
+        else:
+            notes.append("高德未提供房型与房价，0 元不代表免费，预算未计入")
+    elif price_known:
+        label = {"food": "参考人均"}.get(category, "参考消费")
         notes.append(f"高德{label} {price:.0f} 元")
     else:
         notes.append("高德未提供价格/票价，0 元不代表免费，需自行核实")
@@ -127,7 +154,7 @@ def _build_place(city: str, poi: dict, category: str) -> Place | None:
         ticket_price=0.0,
         avg_price=(price or 0.0) if category == "food" else 0.0,
         price_per_night=(price or 0.0) if category == "hotel" else 0.0,
-        level="",
+        level=_hotel_level(poi_type, name) if category == "hotel" else "",
         cuisine=[],
         description="；".join(notes),
         source="amap_live",
@@ -136,7 +163,12 @@ def _build_place(city: str, poi: dict, category: str) -> Place | None:
     )
 
 
-def search_amap_places(city: str, category: str, limit: int = 12) -> tuple[list[Place], str | None]:
+def search_amap_places(
+    city: str,
+    category: str,
+    limit: int = 12,
+    keyword: str | None = None,
+) -> tuple[list[Place], str | None]:
     if not config.AMAP_API_KEY:
         return [], "未配置 AMAP_API_KEY"
     cfg = CATEGORY_CONFIG[category]
@@ -146,7 +178,7 @@ def search_amap_places(city: str, category: str, limit: int = 12) -> tuple[list[
                 "https://restapi.amap.com/v3/place/text",
                 params={
                     "key": config.AMAP_API_KEY,
-                    "keywords": cfg["keywords"],
+                    "keywords": keyword or cfg["keywords"],
                     "types": cfg["types"],
                     "city": city,
                     "citylimit": "true",

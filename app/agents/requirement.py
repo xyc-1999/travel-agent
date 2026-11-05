@@ -364,6 +364,7 @@ def _question_budget(draft: RequirementInput) -> RequirementQuestion | None:
             options=[
                 {"value": "per_person|3000", "label": "人均 3000 元（示例）"},
                 {"value": "total|8000", "label": "总预算 8000 元（示例）"},
+                {"value": "custom", "label": "自定义预算（填写金额）"},
                 {"value": "none", "label": "不设预算，只做估算"},
             ],
             hint="预算口径会影响住宿、餐饮与景点选择，不会把估算当成已确认需求。",

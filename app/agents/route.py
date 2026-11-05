@@ -15,6 +15,7 @@ from app.models import (
 
 
 SPEED_KMH = {"公共交通": 18, "打车": 25, "步行": 4.5, "包车": 30}
+LEVEL_ORDER = {"经济型": 0, "舒适型": 1, "豪华型": 2}
 START_TIME = {"轻松": 9 * 60 + 30, "适中": 9 * 60, "紧凑": 8 * 60 + 30}
 SPOTS_PER_DAY = {"轻松": 1, "适中": 2, "紧凑": 3}
 
@@ -168,14 +169,12 @@ def _hotel_for(draft: RequirementInput, hotels: list[Place]) -> Place | None:
         inns = [hotel for hotel in hotels if "民宿" in hotel.tags or "民宿" in hotel.name]
         if inns:
             return inns[0]
-    # 实时 POI 往往不带档次标签：优先选择有真实参考价的酒店，
-    # 取价格中位数，避免因选中未获取房价的酒店而让住宿费用失真。
-    priced = sorted(
-        (hotel for hotel in hotels if hotel.price_known and hotel.price_per_night > 0),
-        key=lambda hotel: hotel.price_per_night,
-    )
-    if priced:
-        return priced[len(priced) // 2]
+    # 无同档次时，选择档次最接近的已知类型；完全无档次信息时采用高德相关度最高的候选
+    if preferred in LEVEL_ORDER:
+        known = [hotel for hotel in hotels if hotel.level in LEVEL_ORDER]
+        if known:
+            target = LEVEL_ORDER[preferred]
+            return min(known, key=lambda hotel: abs(LEVEL_ORDER[hotel.level] - target))
     return hotels[0]
 
 
@@ -199,6 +198,17 @@ def run_route_planning(
     days: list[DayPlan] = []
     warnings: list[str] = []
     adaptations: list[str] = []
+
+    preferred_lodging = draft.lodging or "舒适型"
+    if verification.source_mode == "amap_live" and hotel:
+        if hotel.level and hotel.level != preferred_lodging:
+            warnings.append(
+                f"高德未返回“{preferred_lodging}”酒店，已选择档次最接近的{hotel.level}「{hotel.name}」。"
+            )
+        elif not hotel.level:
+            warnings.append(
+                f"「{hotel.name}」高德未标注酒店档次，无法确认是否符合“{preferred_lodging}”偏好。"
+            )
 
     must_remaining = [place for place in attractions if place.id in verification.must_visit_ids]
     # 必去地点优先分配到仍开放的日期
@@ -472,6 +482,16 @@ def run_route_planning(
             current_minutes = dinner_end
 
         if hotel and index < day_count - 1:
+            lodging_label = hotel.level or f"{draft.lodging or '舒适型'}偏好"
+            if not hotel.price_known:
+                hotel_note = f"住宿 · {lodging_label}（高德未提供房型与房价，0 元不代表免费，预算未计入）"
+            elif hotel.source == "amap_live":
+                hotel_note = (
+                    f"住宿 · {lodging_label}（高德参考最低价 {hotel.price_per_night:.0f} 元/间/晚；"
+                    "具体房型以预订平台为准）"
+                )
+            else:
+                hotel_note = f"住宿 · {lodging_label}（每间每晚参考价）"
             items.append(
                 ScheduleItem(
                     kind="hotel",
@@ -482,11 +502,7 @@ def run_route_planning(
                     duration_minutes=0,
                     cost=hotel.price_per_night,
                     cost_basis="per_room",
-                    note=(
-                        f"住宿 · {hotel.level or '未标注档次'}（每间每晚参考价）"
-                        if hotel.price_known
-                        else f"住宿 · {hotel.level or '未标注档次'}（房价未获取，0 元不代表免费，预算未计入）"
-                    ),
+                    note=hotel_note,
                     address=hotel.address,
                     lat=hotel.lat,
                     lng=hotel.lng,

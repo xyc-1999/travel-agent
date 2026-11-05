@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>行迹 · AI 多智能体旅行助手</title>
-  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=20261105c" />
 </head>
 <body>
   <div class="app-shell">
@@ -42,13 +42,11 @@
         <form id="trip-form" class="form-grid" autocomplete="off">
           <div class="field">
             <label for="origin">出发地</label>
-            <input id="origin" name="origin" list="city-list" placeholder="如：北京" />
+            <input id="origin" name="origin" data-city-picker="origin" autocomplete="off" placeholder="搜索或输入城市，如：北京" />
           </div>
           <div class="field">
             <label for="destination">目的地（单城市）</label>
-            <select id="destination" name="destination">
-              <option value="">请选择城市</option>
-            </select>
+            <input id="destination" name="destination" data-city-picker="destination" autocomplete="off" placeholder="搜索或输入城市，如：长沙" />
           </div>
 
           <div class="field">
@@ -163,7 +161,6 @@
           </button>
         </form>
 
-        <datalist id="city-list"></datalist>
         <p class="scope-note">第一版范围：中国境内、单城市、单次旅行。跨城市路线、国际签证、自动付款与订单预订不在本版。</p>
       </section>
 
@@ -279,6 +276,6 @@
   </dialog>
 
   <div id="toast" class="toast" hidden></div>
-  <script src="/app.js"></script>
+  <script src="/app.js?v=20261105c"></script>
 </body>
 </html>

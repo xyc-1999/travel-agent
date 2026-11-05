@@ -60,7 +60,7 @@ def _to_verified(place: Place, source_mode: str) -> PlaceCheck:
 
 def run_verification(draft: RequirementInput) -> VerificationResult:
     city = normalize_city_name(draft.destination)
-    snapshot = load_places(city)
+    snapshot = load_places(city, draft.lodging)
     if snapshot.source_mode == "unavailable":
         return VerificationResult(warnings=snapshot.warnings, source_mode=snapshot.source_mode)
 

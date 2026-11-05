@@ -58,10 +58,13 @@ def health() -> dict:
 
 @app.get("/api/meta")
 def meta() -> dict:
+    city_index = list(cities_data()["cities"].keys())
     return {
         "demo_mode": config.DEMO_MODE,
         "supported_cities": supported_cities(),
-        "city_index": list(cities_data()["cities"].keys()),
+        # 配置高德后可用城市扩展到城市索引；否则仅示例库覆盖的 6 座城市
+        "destination_cities": city_index if config.AMAP_API_KEY else supported_cities(),
+        "city_index": city_index,
         "provinces": cities_data()["provinces"],
         "providers": {
             "llm": bool(config.LLM_API_KEY),

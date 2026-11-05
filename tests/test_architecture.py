@@ -55,7 +55,7 @@ def test_unsupported_city_uses_live_poi_adapter(monkeypatch):
     monkeypatch.setattr(place_source.config, "AMAP_API_KEY", "test-key")
     calls: list[str] = []
 
-    def fake_search(city: str, category: str, limit: int = 12):
+    def fake_search(city: str, category: str, limit: int = 12, keyword: str | None = None):
         calls.append(category)
         place = Place(
             id=f"amap-{category}",
@@ -71,9 +71,31 @@ def test_unsupported_city_uses_live_poi_adapter(monkeypatch):
     snapshot = place_source.load_places("桂林")
 
     assert snapshot.source_mode == "amap_live"
-    assert calls == ["attraction", "food", "hotel"]
+    assert calls[:3] == ["attraction", "food", "hotel"]
     assert {place.category for place in snapshot.places} == {"attraction", "food", "hotel"}
     assert any("少于 4 个" in warning for warning in snapshot.warnings)
+
+
+def test_hotel_search_uses_lodging_preference(monkeypatch):
+    monkeypatch.setattr(place_source.config, "AMAP_API_KEY", "test-key")
+    keywords: list[str | None] = []
+
+    def fake_search(city: str, category: str, limit: int = 12, keyword: str | None = None):
+        keywords.append(keyword if category == "hotel" else None)
+        place = Place(
+            id=f"amap-{category}-{len(keywords)}",
+            city=city,
+            name=f"高德-{category}",
+            category=category,  # type: ignore[arg-type]
+            lat=30.0,
+            lng=110.0,
+        )
+        return [place], None
+
+    monkeypatch.setattr(place_source, "search_amap_places", fake_search)
+    place_source.load_places("桂林", "经济型")
+
+    assert keywords[2] == "经济型酒店"
 
 
 def test_list_trips_total_is_not_capped_by_limit(sample_itinerary):

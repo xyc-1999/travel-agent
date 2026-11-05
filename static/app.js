@@ -39,6 +39,127 @@
 
   const money = (value) => `${Math.round(Number(value) || 0).toLocaleString("zh-CN")} 元`;
 
+  const cityOptions = (kind) => {
+    const meta = state.meta || {};
+    if (kind === "origin") return meta.city_index || [];
+    return meta.destination_cities || meta.supported_cities || [];
+  };
+
+  // 自绘城市下拉：替代原生 datalist，支持固定高度滚动、拖动滚动条与键盘选择
+  const enhanceCityInput = (input) => {
+    if (!input || input.dataset.cityReady) return;
+    input.dataset.cityReady = "1";
+    input.removeAttribute("list");
+    const kind = input.dataset.cityPicker || "destination";
+    const menu = document.createElement("div");
+    menu.className = "city-menu";
+    menu.hidden = true;
+    document.body.appendChild(menu);
+
+    let items = [];
+    let activeIndex = -1;
+
+    const placeMenu = () => {
+      const rect = input.getBoundingClientRect();
+      const below = window.innerHeight - rect.bottom - 10;
+      const above = rect.top - 10;
+      const openUp = below < 160 && above > below;
+      const maxHeight = Math.min(240, Math.max(96, openUp ? above : below));
+      menu.style.left = `${rect.left}px`;
+      menu.style.width = `${rect.width}px`;
+      menu.style.maxHeight = `${maxHeight}px`;
+      if (openUp) {
+        menu.style.top = "auto";
+        menu.style.bottom = `${window.innerHeight - rect.top + 4}px`;
+      } else {
+        menu.style.top = `${rect.bottom + 4}px`;
+        menu.style.bottom = "auto";
+      }
+    };
+
+    const close = () => {
+      menu.hidden = true;
+      activeIndex = -1;
+    };
+
+    const open = () => {
+      if (input.disabled) return;
+      const query = input.value.trim();
+      const options = cityOptions(kind);
+      items = options.filter((city) => !query || city.includes(query)).slice(0, 80);
+      if (!items.length) {
+        close();
+        return;
+      }
+      menu.innerHTML = items
+        .map(
+          (city, index) =>
+            `<button type="button" class="city-option" data-index="${index}">${esc(city)}</button>`
+        )
+        .join("");
+      menu.hidden = false;
+      activeIndex = -1;
+      placeMenu();
+    };
+
+    const choose = (city) => {
+      if (!city) return;
+      input.value = city;
+      close();
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+
+    const move = (delta) => {
+      if (!items.length) return;
+      activeIndex = (activeIndex + delta + items.length) % items.length;
+      menu.querySelectorAll(".city-option").forEach((button, index) => {
+        button.classList.toggle("active", index === activeIndex);
+      });
+      menu.querySelector(`[data-index="${activeIndex}"]`)?.scrollIntoView({ block: "nearest" });
+    };
+
+    input.addEventListener("focus", open);
+    input.addEventListener("input", open);
+    input.addEventListener("keydown", (event) => {
+      if (menu.hidden) return;
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        move(1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        move(-1);
+      } else if (event.key === "Enter" && activeIndex >= 0) {
+        event.preventDefault();
+        choose(items[activeIndex]);
+      } else if (event.key === "Escape") {
+        close();
+      }
+    });
+    menu.addEventListener("mousedown", (event) => {
+      const button = event.target.closest(".city-option");
+      if (!button) return;
+      event.preventDefault();
+      choose(items[Number(button.dataset.index)]);
+    });
+    document.addEventListener("pointerdown", (event) => {
+      if (!menu.hidden && event.target !== input && !menu.contains(event.target)) close();
+    });
+    window.addEventListener("resize", () => {
+      if (!menu.hidden) placeMenu();
+    });
+    document.addEventListener(
+      "scroll",
+      () => {
+        if (!menu.hidden) placeMenu();
+      },
+      true
+    );
+  };
+
+  const enhanceCityInputs = (root = document) => {
+    root.querySelectorAll("[data-city-picker]").forEach(enhanceCityInput);
+  };
+
   const showView = (name) => {
     Object.values(views).forEach((node) => { node.hidden = true; });
     if (views[name]) views[name].hidden = false;
@@ -97,19 +218,6 @@
     try {
       const response = await fetch("/api/meta");
       state.meta = await response.json();
-      const select = $("#destination");
-      (state.meta.supported_cities || []).forEach((city) => {
-        const option = document.createElement("option");
-        option.value = city;
-        option.textContent = city;
-        select.appendChild(option);
-      });
-      const datalist = $("#city-list");
-      (state.meta.city_index || []).forEach((city) => {
-        const option = document.createElement("option");
-        option.value = city;
-        datalist.appendChild(option);
-      });
       const providers = state.meta.providers || {};
       const pill = $("#mode-pill");
       const liveCount = [providers.amap, providers.qweather, providers.llm].filter(Boolean).length;
@@ -181,15 +289,29 @@
             </div>
           </div>`;
       } else if (question.id === "origin") {
-        control = `<div class="field"><input name="${esc(question.id)}" list="city-list" placeholder="如：北京" /></div>`;
+        control = `<div class="field"><input name="${esc(question.id)}" data-city-picker="origin" autocomplete="off" placeholder="搜索或输入城市，如：北京" /></div>`;
       } else if (question.options && question.options.length) {
+        const isBudget = question.id === "budget_amount";
+        const customBudget = isBudget
+          ? `
+          <div class="field budget-custom" hidden>
+            <label>自定义预算</label>
+            <div class="budget-custom-row">
+              <select name="budget_custom_basis" data-custom-role="basis">
+                <option value="total">总预算</option>
+                <option value="per_person">人均预算</option>
+              </select>
+              <input type="number" name="budget_custom_amount" data-custom-role="amount" min="1" step="100" placeholder="输入金额（元）" />
+            </div>
+          </div>`
+          : "";
         control = `
           <div class="field">
-            <select name="${esc(question.id)}">
+            <select name="${esc(question.id)}" ${isBudget ? "data-budget-select" : ""}>
               <option value="">请选择</option>
               ${question.options.map((option) => `<option value="${esc(option.value)}">${esc(option.label)}</option>`).join("")}
             </select>
-          </div>`;
+          </div>${customBudget}`;
       } else {
         const type = question.type === "number" ? "number" : "text";
         control = `<div class="field"><input type="${type}" name="${esc(question.id)}" placeholder="请输入" /></div>`;
@@ -199,6 +321,17 @@
       form.appendChild(card);
     });
 
+    form.querySelectorAll("[data-budget-select]").forEach((select) => {
+      const row = select.closest(".question-card")?.querySelector(".budget-custom");
+      if (!row) return;
+      const sync = () => {
+        row.hidden = select.value !== "custom";
+        if (!row.hidden) row.querySelector("[data-custom-role='amount']")?.focus();
+      };
+      select.addEventListener("change", sync);
+      sync();
+    });
+
     const box = $("#assumption-box");
     if (analysis.assumptions && analysis.assumptions.length) {
       box.hidden = false;
@@ -206,18 +339,20 @@
     } else {
       box.hidden = true;
     }
+    enhanceCityInputs(form);
   };
 
   const collectAnswers = () => {
     const answers = {};
-    $("#clarify-form").querySelectorAll("input, select").forEach((input) => {
+    const form = $("#clarify-form");
+    form.querySelectorAll("input, select").forEach((input) => {
       const name = input.name;
-      if (!name) return;
+      if (!name || input.dataset.customRole) return;
       const value = input.value.trim();
       if (!value) return;
       if (name.endsWith("__start")) {
         const base = name.replace("__start", "");
-        const end = $("#clarify-form").querySelector(`[name="${base}__end"]`)?.value || "";
+        const end = form.querySelector(`[name="${base}__end"]`)?.value || "";
         if (end) answers[base] = `${value}|${end}`;
         else answers[base] = value;
       } else if (name.endsWith("__end")) {
@@ -226,6 +361,18 @@
         answers[name] = value;
       }
     });
+
+    const budgetSelect = form.querySelector("[data-budget-select]");
+    if (budgetSelect && budgetSelect.value === "custom") {
+      const amountInput = form.querySelector('[data-custom-role="amount"]');
+      const basisSelect = form.querySelector('[data-custom-role="basis"]');
+      const amount = Number(amountInput?.value);
+      if (amount > 0) {
+        answers["budget_amount"] = `${basisSelect?.value || "total"}|${amount}`;
+      } else {
+        delete answers["budget_amount"];
+      }
+    }
     return answers;
   };
 
@@ -680,8 +827,10 @@
     state.budgetBasis = button.dataset.value;
     $("#budget-basis").querySelectorAll("button").forEach((item) => item.classList.toggle("active", item === button));
     const amountInput = $("#budget-amount");
-    amountInput.placeholder = state.budgetBasis === "per_person" ? "如：3000" : state.budgetBasis === "total" ? "如：8000" : "不设预算";
-    if (!state.budgetBasis) amountInput.value = "";
+    const skipBudget = state.budgetBasis === "";
+    amountInput.disabled = skipBudget;
+    amountInput.placeholder = state.budgetBasis === "per_person" ? "如：3000" : state.budgetBasis === "total" ? "如：8000" : "不设预算，无需填写金额";
+    if (skipBudget) amountInput.value = "";
   });
 
   $("#pace").addEventListener("click", (event) => {
@@ -713,5 +862,6 @@
   });
 
   resetViews();
+  enhanceCityInputs(document);
   loadMeta();
 })();

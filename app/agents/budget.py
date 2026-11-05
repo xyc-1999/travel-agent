@@ -17,6 +17,7 @@ from app.models import (
 BUDGET_TOLERANCE = 500.0
 OTHER_RATE = 0.08
 INTERCITY_MODES = ("高铁", "飞机", "自驾")
+LEVEL_RANK = {"经济型": 0, "舒适型": 1, "豪华型": 2}
 
 
 def _intercity_estimate(
@@ -141,7 +142,10 @@ def _replace_hotel(
         item.lat = hotel.lat
         item.lng = hotel.lng
         item.tags = list(hotel.tags)
-        item.note = f"住宿 · {hotel.level or '未标注档次'}（每间每晚参考价，已按预算容差调整）"
+        item.note = (
+            f"住宿 · {hotel.level or '偏好候选'}（参考最低价 {hotel.price_per_night:.0f} 元/间/晚；"
+            "具体房型以预订平台为准，已按预算容差调整）"
+        )
         item.verification_level = level
         item.price_known = True
         item.hours_known = True
@@ -194,10 +198,23 @@ def run_budget(
 
         if total - limit_total > BUDGET_TOLERANCE and draft.lodging is None:
             hotel_items = [item for day in days for item in day.items if item.kind == "hotel"]
+            current_level = next(
+                (item.place.level for item in verification.places if item.place.id == (hotel_items[0].place_id if hotel_items else "")),
+                "",
+            )
+            current_rank = LEVEL_RANK.get(current_level)
             hotels = [
                 item.place
                 for item in verification.places
-                if item.place.category == "hotel" and item.place.price_per_night > 0
+                if item.place.category == "hotel"
+                and item.place.price_per_night > 0
+                and (
+                    current_rank is None
+                    or (
+                        item.place.level in LEVEL_RANK
+                        and LEVEL_RANK[item.place.level] <= current_rank
+                    )
+                )
             ]
             if hotel_items and hotels:
                 cheapest = min(hotels, key=lambda hotel: hotel.price_per_night)

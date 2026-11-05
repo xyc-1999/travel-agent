@@ -62,6 +62,25 @@ def test_municipality_is_treated_as_city():
     assert analysis.status == "ready"
 
 
+def test_budget_question_offers_custom_amount():
+    from app.agents.requirement import apply_answers
+
+    analysis = analyze_requirement(
+        RequirementInput(
+            raw_text="11月20日到11月22日去成都，2个人",
+            destination="成都",
+        ),
+        session_id="budget-custom",
+        today=TODAY,
+    )
+    budget_question = next(question for question in analysis.questions if question.id == "budget_amount")
+    assert "custom" in {option["value"] for option in budget_question.options}
+
+    updated = apply_answers(analysis.draft, {"budget_amount": "per_person|2500"})
+    assert updated.budget.amount == 2500
+    assert updated.budget.basis == "per_person"
+
+
 def test_missing_budget_basis_asks_one_question():
     analysis = analyze_requirement(
         RequirementInput(

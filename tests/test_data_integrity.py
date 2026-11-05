@@ -5,7 +5,7 @@ from datetime import date, timedelta
 import pytest
 
 from app.agents.budget import run_budget
-from app.agents.route import run_route_planning
+from app.agents.route import _hotel_for, run_route_planning
 from app.models import (
     BudgetSpec,
     Place,
@@ -14,7 +14,7 @@ from app.models import (
     VerificationResult,
     WeatherDay,
 )
-from app.services.amap import _build_place, _parse_closed_weeks, _parse_hours, _to_price
+from app.services.amap import _build_place, _hotel_level, _parse_closed_weeks, _parse_hours, _to_price
 from app.services.llm import _is_safe_summary
 
 
@@ -61,6 +61,26 @@ def test_amap_place_parses_lowest_price_for_hotel():
     assert place is not None
     assert place.price_known is True
     assert place.price_per_night == pytest.approx(328.0)
+    assert "具体房型以预订平台为准" in place.description
+
+
+def test_amap_hotel_level_only_uses_explicit_type():
+    assert _hotel_level("住宿服务;宾馆酒店;经济型连锁酒店", "枳兮酒店") == "经济型"
+    assert _hotel_level("住宿服务;宾馆酒店;三星级宾馆", "徐州酒店") == "舒适型"
+    assert _hotel_level("住宿服务;宾馆酒店;四星级宾馆", "丽景酒店") == "豪华型"
+    assert _hotel_level("住宿服务;宾馆酒店;宾馆酒店", "江畔假日酒店") == ""
+
+
+def test_hotel_selection_follows_lodging_preference():
+    hotels = [
+        Place(id="hotel-eco", city="重庆", name="经济型酒店", category="hotel", level="经济型", lat=29.5, lng=106.5),
+        Place(id="hotel-com", city="重庆", name="舒适型酒店", category="hotel", level="舒适型", lat=29.6, lng=106.6),
+        Place(id="hotel-lux", city="重庆", name="豪华型酒店", category="hotel", level="豪华型", lat=29.7, lng=106.7),
+    ]
+
+    assert _hotel_for(RequirementInput(destination="重庆", lodging="经济型"), hotels).name == "经济型酒店"
+    assert _hotel_for(RequirementInput(destination="重庆", lodging="舒适型"), hotels).name == "舒适型酒店"
+    assert _hotel_for(RequirementInput(destination="重庆", lodging="豪华型"), hotels).name == "豪华型酒店"
 
 
 @pytest.mark.parametrize(
