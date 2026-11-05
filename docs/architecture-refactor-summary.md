@@ -22,6 +22,8 @@
 - CORS 来源改为 `CORS_ORIGINS` 配置，不再默认允许任意来源。
 - 导出格式分发提取到 `app/export_service.py`。
 - 增加高德、天气和 LLM 适配器失败路径测试，以及混合天气来源和路线估算限制测试。
+- 增加高德路线 adapter：按交通方式解析驾车、步行、公交/地铁结果，失败时保留估算路线并在 `TransportLeg` 中标记来源。
+- `TransportLeg` 保存路线道路折线；前端使用原生 OpenStreetMap 瓦片和 SVG 叠加绘制地图，不依赖 Leaflet CDN。瓦片不可达时保留分段路线文本。
 
 | 文件 | 类型 | 变更内容 | 解决的问题 |
 | --- | --- | --- | --- |
@@ -105,7 +107,7 @@ SQLite 路径不再在模块导入时固化，测试和运行时可安全切换�
 ### 自动化测试
 
 ```text
-43 passed, 1 warning in 1.78s
+86 passed, 1 warning
 ```
 
 新增覆盖：

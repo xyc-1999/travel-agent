@@ -81,7 +81,10 @@ def _compose_budget(
     local_transport = 0.0
     hotel_items: list[ScheduleItem] = []
     for day in days:
-        local_transport += sum(leg.cost for leg in day.legs)
+        local_transport += sum(
+            leg.cost * travelers if leg.cost_basis == "per_person" else leg.cost
+            for leg in day.legs
+        )
         for item in day.items:
             if item.kind == "attraction":
                 ticket_total += item.cost * travelers
@@ -116,7 +119,7 @@ def _compose_budget(
         BudgetLine(key="hotel", label="住宿", amount=round(hotel_total, 2), detail=hotel_detail),
         BudgetLine(key="meals", label="餐饮", amount=round(meal_total + breakfast_total, 2), detail=meal_detail),
         BudgetLine(key="tickets", label="门票", amount=round(ticket_total, 2), detail=ticket_detail),
-        BudgetLine(key="local_transport", label="市内交通", amount=round(local_transport, 2), detail="按实际编排路线估算"),
+        BudgetLine(key="local_transport", label="市内交通", amount=round(local_transport, 2), detail="按路线结果或规则估算；公交费用按人数折算"),
         BudgetLine(key="other", label="机动与其他", amount=other_total, detail=f"按小计 {int(OTHER_RATE * 100)}% 预留"),
     ]
     total = round(sum(line.amount for line in lines), 2)

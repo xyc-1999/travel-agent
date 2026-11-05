@@ -534,33 +534,57 @@
 
   const routeSketch = (day) => {
     const points = day.items.filter((item) => item.lat !== null && item.lng !== null && item.kind !== "hotel");
-    if (points.length < 2) return "";
-    const lats = points.map((item) => Number(item.lat));
-    const lngs = points.map((item) => Number(item.lng));
-    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
-    const pad = 24;
-    const width = 320, height = 128;
-    const xs = points.map((item) => {
-      const ratio = maxLng === minLng ? 0.5 : (Number(item.lng) - minLng) / (maxLng - minLng);
-      return pad + ratio * (width - pad * 2);
-    });
-    const ys = points.map((item) => {
-      const ratio = maxLat === minLat ? 0.5 : (Number(item.lat) - minLat) / (maxLat - minLat);
-      return height - pad - ratio * (height - pad * 2);
-    });
-    const coords = xs.map((x, index) => `${x.toFixed(1)},${ys[index].toFixed(1)}`).join(" ");
-    const circles = xs.map((x, index) => `
-      <circle cx="${x.toFixed(1)}" cy="${ys[index].toFixed(1)}" r="9" fill="#fffdfa" stroke="#234f4a" stroke-width="1.6" />
-      <text x="${x.toFixed(1)}" y="${(ys[index] + 3.5).toFixed(1)}" text-anchor="middle" font-size="9" fill="#234f4a">${index + 1}</text>`).join("");
+    if (!points.length) return "";
+    const mapId = `route-map-${day.day_index}-${String(day.date).replaceAll("-", "")}`;
+    const routeLegs = (day.legs || []).filter((leg) => Array.isArray(leg.geometry) && leg.geometry.length > 1);
+    const hasRoadGeometry = routeLegs.length > 0;
     return `
       <div class="route-sketch">
-        <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="当天路线示意">
-          <polyline points="${coords}" fill="none" stroke="#8fb7ab" stroke-width="2" stroke-dasharray="5 4" />
-          ${circles}
-        </svg>
+        <div class="route-map" id="${mapId}" data-points='${esc(JSON.stringify(points.map((item) => ({ name: item.name, lat: item.lat, lng: item.lng })) ))}' data-legs='${esc(JSON.stringify(routeLegs.map((leg) => ({ geometry: leg.geometry, source: leg.source, from: leg.from_place, to: leg.to_place })) ))}'></div>
         <div class="legend">${points.map((item, index) => `${index + 1}. ${esc(item.name)}`).join("　")}</div>
+        <div class="map-attribution">${hasRoadGeometry ? "路线沿道路折线展示" : "无道路路线数据；地图仅标出地点，分段交通信息见下方"} · 地图 © OpenStreetMap</div>
       </div>`;
+  };
+
+  const initializeRouteMaps = (container) => {
+    container.querySelectorAll(".route-map").forEach((element) => {
+      const points = JSON.parse(element.dataset.points || "[]");
+      const legs = JSON.parse(element.dataset.legs || "[]");
+      const locations = points.map((point) => [Number(point.lat), Number(point.lng)]);
+      if (!locations.length) return;
+      const all = legs.flatMap((leg) => leg.geometry || []).concat(locations).map(([lat, lng]) => [Number(lat), Number(lng)]);
+      const minLat = Math.min(...all.map(([lat]) => lat)), maxLat = Math.max(...all.map(([lat]) => lat));
+      const minLng = Math.min(...all.map(([, lng]) => lng)), maxLng = Math.max(...all.map(([, lng]) => lng));
+      const width = element.clientWidth || 640, height = 280, tileSize = 256;
+      const latToY = (lat, zoom) => (1 - Math.log(Math.tan(lat * Math.PI / 180) + 1 / Math.cos(lat * Math.PI / 180)) / Math.PI) / 2 * 2 ** zoom;
+      const lngToX = (lng, zoom) => (lng + 180) / 360 * 2 ** zoom;
+      const span = Math.max(maxLat - minLat, maxLng - minLng);
+      const zoom = Math.max(10, Math.min(16, Math.floor(Math.log2(360 / Math.max(span * 4, 0.01)))));
+      const project = ([lat, lng]) => [lngToX(lng, zoom) * tileSize, latToY(lat, zoom) * tileSize];
+      const projected = all.map(project);
+      const minX = Math.min(...projected.map(([x]) => x)), maxX = Math.max(...projected.map(([x]) => x));
+      const minY = Math.min(...projected.map(([, y]) => y)), maxY = Math.max(...projected.map(([, y]) => y));
+      const centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2;
+      const originX = centerX - width / 2, originY = centerY - height / 2;
+      const tileStartX = Math.floor(originX / tileSize), tileStartY = Math.floor(originY / tileSize);
+      const tileCountX = Math.ceil(width / tileSize) + 1, tileCountY = Math.ceil(height / tileSize) + 1;
+      const maxTile = 2 ** zoom;
+      const tiles = [];
+      for (let tx = 0; tx < tileCountX; tx += 1) for (let ty = 0; ty < tileCountY; ty += 1) {
+        const x = tileStartX + tx, y = tileStartY + ty;
+        if (y < 0 || y >= maxTile) continue;
+        const wrappedX = ((x % maxTile) + maxTile) % maxTile;
+        tiles.push(`<img class="map-tile" src="https://tile.openstreetmap.org/${zoom}/${wrappedX}/${y}.png" style="left:${x * tileSize - originX}px;top:${y * tileSize - originY}px" alt="" />`);
+      }
+      const toView = (point) => { const [x, y] = project(point); return [x - originX, y - originY]; };
+      const routeSvg = legs.map((leg) => {
+        const geometry = (leg.geometry || []).map(([lat, lng]) => toView([Number(lat), Number(lng)]));
+        if (geometry.length < 2) return "";
+        return `<polyline points="${geometry.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ")}" class="map-route ${leg.source === "amap_route" ? "live" : "estimated"}" />`;
+      }).join("");
+      const markers = locations.map((location, index) => { const [x, y] = toView(location); return `<span class="route-marker" style="left:${x - 13}px;top:${y - 13}px">${index + 1}</span>`; }).join("");
+      element.innerHTML = `<div class="map-tiles">${tiles.join("")}</div><svg class="map-overlay" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">${routeSvg}</svg><div class="map-markers">${markers}</div><div class="map-credit">© OpenStreetMap contributors</div>`;
+    });
   };
 
   const renderDay = (day) => {
@@ -609,7 +633,7 @@
         <div class="day-body">
           ${routeSketch(day)}
           <div class="timeline">${items}</div>
-          ${legs.length ? `<div class="day-foot">${legs.map((leg) => `<p>交通：${esc(leg.mode)} ${esc(leg.from_place)} → ${esc(leg.to_place)}，约 ${esc(leg.minutes)} 分钟 / ${esc(leg.distance_km)} km</p>`).join("")}</div>` : ""}
+          ${legs.length ? `<div class="day-foot">${legs.map((leg) => `<p>交通：${esc(leg.mode)} ${esc(leg.from_place)} → ${esc(leg.to_place)}，约 ${esc(leg.minutes)} 分钟 / ${esc(leg.distance_km)} km · ${esc(leg.route_summary || "规则估算路线")}</p>`).join("")}</div>` : ""}
           ${notes ? `<div class="day-foot">${notes}</div>` : ""}
         </div>
       </article>`;
@@ -734,6 +758,7 @@
         <span>生成时间：${esc(itinerary.created_at.replace("T", " ").slice(0, 16))} · 行程编号 ${esc(itinerary.trip_id)}</span>
         <span>${esc(itinerary.data_mode_label)}</span>
       </div>`;
+    initializeRouteMaps(container);
     container.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 

@@ -79,7 +79,7 @@ def _item_lines(itinerary: Itinerary) -> list[str]:
                 lines.append(f"    说明：{item.note}")
         for leg in day.legs:
             if leg.distance_km > 0:
-                lines.append(f"  交通：{leg.mode} {leg.from_place} → {leg.to_place}，约 {leg.minutes} 分钟 / {leg.distance_km} km")
+                lines.append(f"  交通：{leg.mode} {leg.from_place} → {leg.to_place}，约 {leg.minutes} 分钟 / {leg.distance_km} km（{leg.route_summary or '规则估算路线'}）")
         for note in day.notes:
             lines.append(f"  提示：{note}")
         lines.append("")
@@ -218,7 +218,7 @@ def build_docx(itinerary: Itinerary) -> bytes:
         for leg in day.legs:
             if leg.distance_km > 0:
                 document.add_paragraph(
-                    f"交通：{leg.mode} {leg.from_place} → {leg.to_place}，约 {leg.minutes} 分钟 / {leg.distance_km} km",
+                    f"交通：{leg.mode} {leg.from_place} → {leg.to_place}，约 {leg.minutes} 分钟 / {leg.distance_km} km（{leg.route_summary or '规则估算路线'}）",
                     style="List Bullet 2",
                 )
         for note in day.notes:
@@ -357,7 +357,7 @@ def build_pdf(itinerary: Itinerary) -> bytes:
             if leg.distance_km > 0:
                 story.append(
                     Paragraph(
-                        escape(f"交通：{leg.mode} {leg.from_place} → {leg.to_place}，约 {leg.minutes} 分钟 / {leg.distance_km} km"),
+                        escape(f"交通：{leg.mode} {leg.from_place} → {leg.to_place}，约 {leg.minutes} 分钟 / {leg.distance_km} km（{leg.route_summary or '规则估算路线'}）"),
                         styles["small"],
                     )
                 )
@@ -437,7 +437,7 @@ def build_doc_rtf(itinerary: Itinerary) -> bytes:
                 lines.append(f"    说明：{item.note}")
         for leg in day.legs:
             if leg.distance_km > 0:
-                lines.append(f"    交通：{leg.mode} {leg.from_place} → {leg.to_place}，约 {leg.minutes} 分钟 / {leg.distance_km} km")
+                lines.append(f"    交通：{leg.mode} {leg.from_place} → {leg.to_place}，约 {leg.minutes} 分钟 / {leg.distance_km} km（{leg.route_summary or '规则估算路线'}）")
         for note in day.notes:
             lines.append(f"    提示：{note}")
     if itinerary.tips:

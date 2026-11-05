@@ -14,6 +14,13 @@ CATEGORY_CONFIG = {
     "hotel": {"types": "100000", "keywords": "酒店"},
 }
 
+ROUTE_ENDPOINTS = {
+    "打车": "https://restapi.amap.com/v3/direction/driving",
+    "包车": "https://restapi.amap.com/v3/direction/driving",
+    "步行": "https://restapi.amap.com/v3/direction/walking",
+    "公共交通": "https://restapi.amap.com/v3/direction/transit/integrated",
+}
+
 # 按用户住宿偏好分别检索，避免不同偏好得到同一批酒店
 HOTEL_KEYWORDS = {
     "经济型": "经济型酒店",
@@ -204,3 +211,74 @@ def search_amap_places(
         if len(places) >= limit:
             break
     return places, None
+
+
+def route_amap_places(
+    origin: tuple[float, float],
+    destination: tuple[float, float],
+    mode: str,
+    city: str,
+) -> tuple[float, int, float, str, list[tuple[float, float]]] | None:
+    """返回真实路线的距离、耗时、费用、摘要和道路折线；失败时返回 None。"""
+    if not config.AMAP_API_KEY or mode not in ROUTE_ENDPOINTS:
+        return None
+    endpoint = ROUTE_ENDPOINTS[mode]
+    params = {
+        "key": config.AMAP_API_KEY,
+        "origin": f"{origin[1]:.6f},{origin[0]:.6f}",
+        "destination": f"{destination[1]:.6f},{destination[0]:.6f}",
+    }
+    if mode == "公共交通":
+        params.update({"city": city, "strategy": "0", "alternative_route": "0"})
+    try:
+        with httpx.Client(timeout=config.AMAP_ROUTE_TIMEOUT_SECONDS) as client:
+            response = client.get(endpoint, params=params)
+            payload = response.json()
+    except (httpx.HTTPError, ValueError):
+        return None
+    if payload.get("status") != "1":
+        return None
+    route = payload.get("route") or {}
+    candidates = route.get("paths") if mode != "公共交通" else route.get("transits")
+    if not candidates:
+        return None
+    selected = candidates[0]
+    try:
+        distance = float(selected.get("distance", 0)) / 1000
+        minutes = max(1, round(float(selected.get("duration", 0)) / 60))
+    except (TypeError, ValueError):
+        return None
+    if distance <= 0 or minutes <= 0:
+        return None
+    geometry: list[tuple[float, float]] = []
+    for step in selected.get("steps") or []:
+        raw_polyline = str(step.get("polyline") or "")
+        for point in raw_polyline.split(";"):
+            try:
+                lng_text, lat_text = point.split(",", 1)
+                geometry.append((float(lat_text), float(lng_text)))
+            except (ValueError, TypeError):
+                continue
+    if mode == "公共交通":
+        for transit in selected.get("segments") or []:
+            for walking in transit.get("walking", {}).get("steps", []):
+                for point in str(walking.get("polyline") or "").split(";"):
+                    try:
+                        lng_text, lat_text = point.split(",", 1)
+                        geometry.append((float(lat_text), float(lng_text)))
+                    except (ValueError, TypeError):
+                        continue
+    toll = selected.get("taxi_cost") if mode in {"打车", "包车"} else selected.get("tolls")
+    toll = toll or selected.get("tolls") or selected.get("cost") or 0
+    try:
+        cost = max(0.0, float(toll))
+    except (TypeError, ValueError):
+        cost = 0.0
+    summary = "高德实时路线"
+    if mode == "公共交通":
+        summary = "高德公交/地铁路线"
+    elif mode == "步行":
+        summary = "高德步行路线"
+    else:
+        summary = "高德驾车路线"
+    return round(distance, 2), minutes, round(cost, 2), summary, geometry

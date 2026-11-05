@@ -676,9 +676,19 @@ input:disabled, select:disabled {
 .day-foot { margin-top: 8px; padding-top: 8px; border-top: 1px dashed #eee4d6; font-size: 10.5px; color: var(--muted); }
 .day-foot p { margin: 3px 0; }
 
-.route-sketch { margin: 10px 0 4px; border: 1px dashed #dfd6c6; border-radius: 10px; padding: 8px; background: #fcfaf6; }
-.route-sketch svg { width: 100%; height: 128px; display: block; }
+.route-sketch { margin: 10px 0 4px; border: 1px solid #d8dedb; border-radius: 8px; padding: 8px; background: #fff; }
+.route-map { width: 100%; height: 280px; display: block; overflow: hidden; position: relative; background: #edf1ef; z-index: 0; }
 .route-sketch .legend { display: flex; gap: 12px; font-size: 10px; color: var(--muted); margin-top: 4px; flex-wrap: wrap; }
+.map-attribution { margin-top: 5px; font-size: 10px; color: var(--muted); }
+.map-tiles, .map-overlay, .map-markers { position: absolute; inset: 0; width: 100%; height: 100%; }
+.map-tile { position: absolute; width: 256px; height: 256px; max-width: none; }
+.map-overlay { pointer-events: none; }
+.map-route { fill: none; stroke: #087e73; stroke-width: 5; stroke-linejoin: round; stroke-linecap: round; }
+.map-route.estimated { stroke: #df7a35; stroke-dasharray: 8 7; }
+.map-markers { pointer-events: none; }
+.route-marker { position: absolute; display: grid; place-items: center; width: 26px; height: 26px; border: 2px solid #fff; border-radius: 50%; background: #155f58; color: #fff; font-size: 12px; font-weight: 700; box-shadow: 0 1px 5px #0005; }
+.map-credit { position: absolute; right: 4px; bottom: 2px; padding: 1px 4px; background: #fff9; color: #444; font-size: 10px; }
+.map-fallback { display: grid; place-items: center; height: 100%; padding: 24px; color: var(--muted); text-align: center; }
 
 .budget-table { width: 100%; border-collapse: collapse; font-size: 12px; }
 .budget-table th, .budget-table td { padding: 9px 10px; border-bottom: 1px solid #eee6da; text-align: left; }

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 
 from app.data_loader import haversine_km, normalize_city_name
+from app.services.amap import route_amap_places
 from app.models import (
     DayPlan,
     Place,
@@ -58,6 +59,25 @@ def _travel(current: Place | None, target: Place, mode: str, travelers: int) -> 
         cost=round(cost, 2),
         cost_basis="per_group",
     )
+    if current is not None:
+        live = route_amap_places(
+            (current.lat, current.lng),
+            (target.lat, target.lng),
+            mode,
+            current.city,
+        )
+        if live:
+            distance_km, live_minutes, live_cost, summary, geometry = live
+            if mode in {"打车", "包车"} and live_cost <= 0:
+                live_cost = cost
+            leg.distance_km = distance_km
+            leg.minutes = live_minutes
+            leg.cost = live_cost
+            leg.cost_basis = "per_person" if mode == "公共交通" else "per_group"
+            leg.source = "amap_route"
+            leg.route_summary = summary
+            leg.geometry = geometry
+            return leg, live_minutes
     return leg, minutes
 
 

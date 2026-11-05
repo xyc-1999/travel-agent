@@ -149,6 +149,9 @@ class TransportLeg(BaseModel):
     minutes: int = 0
     cost: float = 0.0
     cost_basis: Literal["per_group", "per_person"] = "per_group"
+    source: Literal["amap_route", "estimated"] = "estimated"
+    route_summary: str = ""
+    geometry: list[tuple[float, float]] = Field(default_factory=list)
 
 
 class ScheduleItem(BaseModel):
