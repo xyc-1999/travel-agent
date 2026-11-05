@@ -110,7 +110,8 @@
 travel-agent/
 ├─ app/
 │  ├─ main.py                # FastAPI 路由、SSE、静态托管
-│  ├─ orchestrator.py        # 六阶段流水线与事件源
+│  ├─ orchestrator.py        # 阶段排序、结果组装与 SSE 事件源
+│  ├─ pipeline.py            # 阶段契约、统一事件与六阶段实现
 │  ├─ models.py              # 需求/地点/天气/行程/预算/轨迹模型
 │  ├─ storage.py             # SQLite 会话与行程
 │  ├─ export.py              # DOCX / DOC / PDF / Markdown
@@ -124,6 +125,7 @@ travel-agent/
 │  │  └─ budget.py           # 预算计算
 │  ├─ services/
 │  │  ├─ weather.py          # 和风预报 / 气候参考 / 演示天气
+│  │  ├─ place_source.py     # 示例库 / 高德 POI 统一加载
 │  │  ├─ amap.py             # 可选高德 POI 适配
 │  │  └─ llm.py              # 可选 OpenAI 兼容文案润色
 │  └─ data/
@@ -133,7 +135,7 @@ travel-agent/
 │     └─ knowledge/*.md      # 6 篇示例攻略
 ├─ static/                   # 前端页面
 ├─ docs/screenshots/         # README 截图
-├─ tests/                    # 38 个 pytest 用例
+├─ tests/                    # 43 个 pytest 用例
 ├─ scripts/smoke.py          # 真实 HTTP + SSE + 导出冒烟脚本
 ├─ artifacts/                # 冒烟生成的导出文件
 ├─ .env.example
@@ -220,7 +222,7 @@ $env:PIP_CACHE_DIR = "d:\Courses\travel-agent\.pip-cache"
 
 已验证结果：
 
-- `38 passed`，覆盖：
+- `43 passed`，覆盖：
   - 自然语言解析（出发地、目的地、日期、人数、预算口径、必去、避开、节奏）
   - 省级目的地追问、直辖市按城市处理、表单优先与清单合并
   - 预算口径追问、日期/天数冲突、问题截断后的显式假设

@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from app import config
-from app.data_loader import is_supported_destination, normalize_city_name, places_for_city
+from app.data_loader import normalize_city_name
 from app.models import PlaceCheck, Place, RequirementInput, VerificationResult
-from app.services.amap import search_amap_places
+from app.services.place_source import load_places
 
 
 def _closed_on(place: Place, day: date) -> bool:
@@ -57,30 +56,14 @@ def _to_verified(place: Place, source_mode: str) -> PlaceCheck:
 
 def run_verification(draft: RequirementInput) -> VerificationResult:
     city = normalize_city_name(draft.destination)
-    source_mode = "demo_catalog"
-    warnings: list[str] = []
+    snapshot = load_places(city)
+    if snapshot.source_mode == "unavailable":
+        return VerificationResult(warnings=snapshot.warnings, source_mode=snapshot.source_mode)
 
-    if is_supported_destination(city):
-        raw_places = places_for_city(city)
-    elif config.AMAP_API_KEY:
-        source_mode = "amap_live"
-        raw_places = []
-        for category in ("attraction", "food", "hotel"):
-            fetched, error = search_amap_places(city, category, limit=14 if category == "attraction" else 10)
-            if error:
-                warnings.append(error)
-            raw_places.extend(fetched)
-        if len([p for p in raw_places if p.category == "attraction"]) < 4:
-            warnings.append("高德候选景点少于 4 个，无法保证可靠编排。")
-    else:
-        return VerificationResult(
-            warnings=[f"当前环境没有“{city}”的地点数据；演示库仅覆盖北京、上海、成都、杭州、西安、大理。"],
-            source_mode="unavailable",
-        )
-
+    source_mode = snapshot.source_mode
+    warnings: list[str] = list(snapshot.warnings)
     places: list[PlaceCheck] = []
-    for raw in raw_places:
-        place = raw if isinstance(raw, Place) else Place.model_validate(raw)
+    for place in snapshot.places:
         hit = _avoid_hit(place, draft.avoid)
         if hit:
             warnings.append(f"已按“不去/避开 {hit}”排除地点：{place.name}")

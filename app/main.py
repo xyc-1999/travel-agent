@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
@@ -12,7 +13,7 @@ from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import config
-from app.agents.requirement import _apply_answers, analyze_requirement
+from app.agents.requirement import analyze_requirement, apply_answers
 from app.export import build_doc_rtf, build_docx, build_markdown, build_pdf
 from app.models import (
     AnalyzeResponse,
@@ -27,18 +28,19 @@ from app.storage import get_session, get_trip, init_db, list_trips, save_session
 from app.data_loader import cities_data, supported_cities
 
 
-app = FastAPI(title="行迹 · AI 多智能体旅行助手", version="1.0.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    init_db()
+    yield
+
+
+app = FastAPI(title="行迹 · AI 多智能体旅行助手", version="1.0.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    init_db()
 
 
 @app.get("/api/health")
@@ -88,7 +90,7 @@ def clarify(request: ClarifyRequest) -> AnalyzeResponse:
     if not session:
         raise HTTPException(status_code=404, detail="会话不存在或已过期")
     payload, _ = session
-    payload = _apply_answers(payload, request.answers)
+    payload = apply_answers(payload, request.answers)
     analysis = analyze_requirement(payload, session_id=request.session_id, answers=request.answers)
     save_session(request.session_id, payload, analysis)
     return analysis

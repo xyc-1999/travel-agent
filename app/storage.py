@@ -15,12 +15,10 @@ from app.models import (
 )
 
 
-DB_PATH: Path = config.DATABASE_PATH
-
-
 def _connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
+    database_path: Path = config.DATABASE_PATH
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(database_path)
     connection.row_factory = sqlite3.Row
     return connection
 
@@ -108,6 +106,7 @@ def get_trip(trip_id: str) -> Itinerary | None:
 
 def list_trips(limit: int = 20) -> TripListResponse:
     with _session() as connection:
+        total = connection.execute("SELECT COUNT(*) FROM trips").fetchone()[0]
         rows = connection.execute(
             "SELECT itinerary FROM trips ORDER BY created_at DESC LIMIT ?", (limit,)
         ).fetchall()
@@ -126,4 +125,4 @@ def list_trips(limit: int = 20) -> TripListResponse:
                 created_at=itinerary.created_at,
             )
         )
-    return TripListResponse(total=len(items), items=items)
+    return TripListResponse(total=total, items=items)

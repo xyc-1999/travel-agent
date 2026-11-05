@@ -259,7 +259,7 @@ def test_travelers_without_ge_suffix_are_parsed():
 
 
 def test_clarify_answers_complete_the_request():
-    from app.agents.requirement import _apply_answers
+    from app.agents.requirement import apply_answers
 
     payload = RequirementInput(raw_text="想去成都玩")
     first = analyze_requirement(payload, session_id="clarify-1", today=TODAY)
@@ -270,7 +270,7 @@ def test_clarify_answers_complete_the_request():
         "budget_amount": "total|6000",
         "origin": "上海",
     }
-    updated_payload = _apply_answers(first.draft, answers)
+    updated_payload = apply_answers(first.draft, answers)
     second = analyze_requirement(updated_payload, session_id="clarify-1", answers=answers, today=TODAY)
 
     assert second.status == "ready"

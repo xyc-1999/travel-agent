@@ -6,3 +6,10 @@ data/app.db
 artifacts/*
 .env
 .pytest_cache/
+.agents/
+.claude/
+.codebuddy/
+.junie/
+.qoder/
+.trae/skills/
+skills-lock.json

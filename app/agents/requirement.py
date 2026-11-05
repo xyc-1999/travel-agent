@@ -463,7 +463,7 @@ def analyze_requirement(
             field_sources["budget"] = "user_text"
 
     if answers:
-        draft = _apply_answers(draft, answers)
+        draft = apply_answers(draft, answers)
 
     if draft.destination:
         draft.destination = normalize_city_name(draft.destination)
@@ -603,7 +603,7 @@ def analyze_requirement(
     )
 
 
-def _apply_answers(draft: RequirementInput, answers: dict[str, str]) -> RequirementInput:
+def apply_answers(draft: RequirementInput, answers: dict[str, str]) -> RequirementInput:
     updates: dict[str, object] = {}
     for question_id, raw_value in answers.items():
         value = str(raw_value).strip()

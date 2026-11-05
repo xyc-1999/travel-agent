@@ -1,50 +1,37 @@
 from __future__ import annotations
 
-import time
 import uuid
 from datetime import datetime
-from typing import Generator
+from typing import Generator, cast
 
-from app.agents.budget import run_budget
-from app.agents.research import run_research
-from app.agents.route import run_route_planning
-from app.agents.verification import run_verification
 from app.models import (
     AgentTrace,
+    BudgetPlan,
     Itinerary,
     RequirementInput,
+    ResearchResult,
     SourceRef,
     VerificationResult,
     WeatherDay,
 )
+from app.pipeline import (
+    STAGE_META,
+    RouteOutcome,
+    WeatherOutcome,
+    budget_stage,
+    requirement_stage,
+    research_stage,
+    route_stage,
+    run_stage,
+    verification_stage,
+    weather_stage,
+)
 from app.services.llm import generate_narrative
-from app.services.weather import build_weather
 from app.storage import get_session, save_trip
-
-
-STAGE_META = [
-    ("requirement", "需求理解"),
-    ("research", "资料检索"),
-    ("weather", "天气适配"),
-    ("verification", "地点核验"),
-    ("route", "路线编排"),
-    ("budget", "预算计算"),
-]
 
 
 class PipelineError(RuntimeError):
     pass
-
-
-def _trace(agent: str, label: str, summary: str, details: list[str], start: float, status: str = "done") -> AgentTrace:
-    return AgentTrace(
-        agent=agent,
-        label=label,
-        status=status,  # type: ignore[arg-type]
-        summary=summary,
-        details=details,
-        duration_ms=int((time.perf_counter() - start) * 1000),
-    )
 
 
 def _source_label(verification: VerificationResult, weather_days: list[WeatherDay], llm_used: bool) -> tuple[bool, str]:
@@ -116,123 +103,45 @@ def iter_generation(session_id: str) -> Generator[dict, None, None]:
     warnings: list[str] = list(analysis.assumptions)
     assumptions: list[str] = list(analysis.assumptions)
 
+    total = len(STAGE_META)
+
     # 1. 需求理解（复核）
-    start = time.perf_counter()
-    yield {"event": "agent_start", "data": {"agent": "requirement", "label": "需求理解", "index": 1, "total": len(STAGE_META)}}
-    details = [analysis.summary]
-    if analysis.assumptions:
-        details.extend(analysis.assumptions[:3])
-    requirement_trace = _trace("requirement", "需求理解", "已完成结构化需求与冲突检查", details, start)
-    trace.append(requirement_trace)
-    yield {"event": "agent_done", "data": requirement_trace.model_dump(mode="json")}
+    run = yield from run_stage("requirement", "需求理解", 1, total, lambda: requirement_stage(analysis))
+    trace.append(run.trace)
 
     # 2. 资料检索
-    start = time.perf_counter()
-    yield {"event": "agent_start", "data": {"agent": "research", "label": "资料检索", "index": 2, "total": len(STAGE_META)}}
-    research = run_research(draft)
-    research_details = [f"{snippet.title}（匹配分 {snippet.score}）" for snippet in research.snippets]
-    if not research.snippets:
-        research_details.append(research.note)
-    research_trace = _trace(
-        "research",
-        "资料检索",
-        f"检索到 {len(research.snippets)} 条示例攻略片段",
-        research_details,
-        start,
-        "warning" if not research.snippets else "done",
-    )
-    trace.append(research_trace)
-    yield {"event": "agent_done", "data": research_trace.model_dump(mode="json")}
+    run = yield from run_stage("research", "资料检索", 2, total, lambda: research_stage(draft))
+    research = cast(ResearchResult, run.outcome.value)
+    trace.append(run.trace)
 
     # 3. 天气
-    start = time.perf_counter()
-    yield {"event": "agent_start", "data": {"agent": "weather", "label": "天气适配", "index": 3, "total": len(STAGE_META)}}
-    weather_days, weather_provider = build_weather(
-        draft.destination or "",
-        draft.start_date,  # type: ignore[arg-type]
-        draft.end_date,  # type: ignore[arg-type]
-        draft.demo_weather,
-    )
-    bad_days = [day for day in weather_days if not day.outdoor_ok]
-    weather_details = [
-        f"{day.date.strftime('%m-%d')}：{day.condition}，{day.low}~{day.high}℃，降水概率 {day.rain_probability}%（{day.source}）"
-        for day in weather_days
-    ]
-    weather_trace = _trace(
-        "weather",
-        "天气适配",
-        f"{len(weather_days)} 天天气约束，{len(bad_days)} 天不适合长时间户外",
-        weather_details,
-        start,
-        "warning" if weather_provider != "qweather_forecast" else "done",
-    )
-    trace.append(weather_trace)
-    yield {"event": "agent_done", "data": weather_trace.model_dump(mode="json")}
+    run = yield from run_stage("weather", "天气适配", 3, total, lambda: weather_stage(draft))
+    weather = cast(WeatherOutcome, run.outcome.value)
+    weather_days = weather.days
+    trace.append(run.trace)
 
     # 4. 地点核验
-    start = time.perf_counter()
-    yield {"event": "agent_start", "data": {"agent": "verification", "label": "地点核验", "index": 4, "total": len(STAGE_META)}}
-    verification = run_verification(draft)
-    verified_attractions = [item.place.name for item in verification.places if item.place.category == "attraction"]
-    verification_details = [
-        f"可用地点 {len(verification.places)} 个（景点 {len(verified_attractions)}）",
-        f"核验来源：{verification.source_mode}",
-    ]
-    if verification.must_visit_ids:
-        verification_details.append(f"必去地点已核验 {len(verification.must_visit_ids)} 个")
-    verification_details.extend(verification.warnings[:4])
-    warnings.extend(verification.warnings)
-    verification_status = "error" if not verified_attractions else ("warning" if verification.warnings else "done")
-    verification_trace = _trace("verification", "地点核验", "完成地点匹配与开放日校验", verification_details, start, verification_status)
-    trace.append(verification_trace)
-    yield {"event": "agent_done", "data": verification_trace.model_dump(mode="json")}
-
+    run = yield from run_stage("verification", "地点核验", 4, total, lambda: verification_stage(draft))
+    verification = cast(VerificationResult, run.outcome.value)
+    warnings.extend(run.outcome.warnings or [])
+    trace.append(run.trace)
+    verified_attractions = [item.place for item in verification.places if item.place.category == "attraction"]
     if not verified_attractions:
         yield {"event": "error", "data": {"message": "没有通过核验的景点，无法生成行程。", "details": verification.warnings}}
         return
 
     # 5. 路线编排
-    start = time.perf_counter()
-    yield {"event": "agent_start", "data": {"agent": "route", "label": "路线编排", "index": 5, "total": len(STAGE_META)}}
-    days, route_warnings, adaptations = run_route_planning(draft, verification, weather_days)
-    warnings.extend(route_warnings)
-    attraction_count = sum(1 for day in days for item in day.items if item.kind == "attraction")
-    route_details = [
-        f"编排 {len(days)} 天，{attraction_count} 个景点",
-        f"天气适配 {len(adaptations)} 处",
-    ]
-    route_details.extend(adaptations[:3])
-    route_trace = _trace(
-        "route",
-        "路线编排",
-        "完成按天分组、就近排序与时间轴编排",
-        route_details,
-        start,
-        "warning" if route_warnings else "done",
-    )
-    trace.append(route_trace)
-    yield {"event": "agent_done", "data": route_trace.model_dump(mode="json")}
+    run = yield from run_stage("route", "路线编排", 5, total, lambda: route_stage(draft, verification, weather_days))
+    route = cast(RouteOutcome, run.outcome.value)
+    days = route.days
+    warnings.extend(run.outcome.warnings or [])
+    trace.append(run.trace)
 
     # 6. 预算
-    start = time.perf_counter()
-    yield {"event": "agent_start", "data": {"agent": "budget", "label": "预算计算", "index": 6, "total": len(STAGE_META)}}
-    budget = run_budget(draft, days, verification)
-    assumptions.extend(budget.assumptions)
-    budget_details = [
-        f"总估算 {budget.total:.0f} 元，人均 {budget.per_person:.0f} 元",
-        f"预算状态：{budget.budget_status}",
-    ]
-    budget_details.extend(budget.suggestions[:3])
-    budget_trace = _trace(
-        "budget",
-        "预算计算",
-        "完成分项预算与预算口径校验",
-        budget_details,
-        start,
-        "warning" if budget.budget_status == "over_budget" else "done",
-    )
-    trace.append(budget_trace)
-    yield {"event": "agent_done", "data": budget_trace.model_dump(mode="json")}
+    run = yield from run_stage("budget", "预算计算", 6, total, lambda: budget_stage(draft, days, verification))
+    budget = cast(BudgetPlan, run.outcome.value)
+    assumptions.extend(run.outcome.assumptions or [])
+    trace.append(run.trace)
 
     if budget.budget_status == "over_budget":
         warnings.append(
