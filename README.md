@@ -224,16 +224,18 @@ $env:PIP_CACHE_DIR = "d:\Courses\travel-agent\.pip-cache"
 
 已验证结果：
 
-- `43 passed`，覆盖：
+- `48 passed`，覆盖：
   - 自然语言解析（出发地、目的地、日期、人数、预算口径、必去、避开、节奏）
   - 省级目的地追问、直辖市按城市处理、表单优先与清单合并
   - 预算口径追问、日期/天数冲突、问题截断后的显式假设
   - 端到端行程结构、时间轴不倒挂、预算分项求和
   - 雨天室内适配记录、必去不被替换、超预算透明建议、无预算不误判
   - 必去未匹配、避开别名过滤、未覆盖城市显式不可用
+  - 和风 API Host 解析、本地坐标转天气请求参数、测试与本地真实 Key 隔离
   - 阶段契约边界：`agent_start` 先于 `agent_done`、trace 状态与耗时、示例库/高德/不可用三种地点来源、分页总数不被 `limit` 截断
   - DOCX 为合法 Word 包、PDF 可解析、`.doc` 为纯 ASCII RTF、Markdown 完整
   - API health/meta、澄清后生成、404、导出、SSE 六 Agent 顺序
+- 真实 Provider 实测（2026-11-05）：成都天气来源 `qweather_forecast`，青岛地点来源 `amap_live`，详见 [docs/live-api-verification.md](docs/live-api-verification.md)。仓库中不含密钥。
 - `scripts/smoke.py` 实际输出：
   - SSE 事件：6 次 `agent_start` → 6 次 `agent_done` → `result`
   - 导出：DOCX 约 40 KB、DOC 约 17 KB、PDF 约 9 KB、MD 约 7 KB（生成于 `artifacts/`）
